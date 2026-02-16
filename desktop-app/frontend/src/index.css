@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@layer base {
+
+    html,
+    body {
+        overflow: hidden;
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+}
+
+@layer utilities {
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .thin-scrollbar::-webkit-scrollbar {
+        width: 3px;
+        height: 3px;
+    }
+
+    .thin-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .thin-scrollbar::-webkit-scrollbar-thumb {
+        background: #d8d8d8;
+        /* zinc-700 */
+        border-radius: 9999px;
+    }
+
+    .thin-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #828283;
+        /* zinc-600 */
+    }
+}

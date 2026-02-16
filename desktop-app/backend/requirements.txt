@@ -1,0 +1,16 @@
+# Core Dependencies (Cross-Platform)
+google-generativeai
+screeninfo
+pynput
+Pillow
+PyQt6
+
+# Windows Specific Dependencies
+pywebview[edgechromium] ; sys_platform == 'win32'
+pywin32 ; sys_platform == 'win32'
+winsdk ; sys_platform == 'win32'
+
+# Linux Specific Dependencies
+pywebview[qt] ; sys_platform == 'linux'
+mss ; sys_platform == 'linux'
+pytesseract ; sys_platform == 'linux'
