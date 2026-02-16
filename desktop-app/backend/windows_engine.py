@@ -18,7 +18,7 @@ class WindowsEngine:
             try:
                 # Late imports to avoid breaking on non-Windows dev environments
                 from winsdk.windows.media.ocr import OcrEngine
-                from winsdk.windows.globals import Language
+                from winsdk.windows.globalization import Language
                 
                 # Import pywin32 components
                 global win32gui, win32con, win32api

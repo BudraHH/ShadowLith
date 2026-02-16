@@ -257,16 +257,16 @@ def start_app():
     api = ShadowLithAPI()
     
     # URL Logic
-    # file_path = os.path.join(BASE_DIR, "ui", "index.html")
-    # if os.getenv("SHADOWLITH_DEBUG"):
-    #     url = os.getenv("SHADOWLITH_DEBUG_URL", "http://localhost:5174")
-    #     print(f"Debug Mode: {url}")
-    # elif os.path.exists(file_path):
-    #     url = file_path
-    #     print("Production Build Loaded.")
-    # else:
-    url = "http://localhost:5174"
-    print("Forced Dev Server (Localhost) for Live Updates.")
+    file_path = os.path.join(BASE_DIR, "ui", "index.html")
+    if os.getenv("SHADOWLITH_DEBUG"):
+        url = os.getenv("SHADOWLITH_DEBUG_URL", "http://localhost:5174")
+        print(f"Debug Mode: {url}")
+    elif os.path.exists(file_path):
+        url = file_path
+        print("Production Build Loaded.")
+    else:
+        url = "http://localhost:5174"
+        print("Forced Dev Server (Localhost) - UI Build Not Found.")
 
     # Use Qt engine on Windows (User Preferred for Transparency)
     gui_engine = 'qt'
