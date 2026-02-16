@@ -34,7 +34,7 @@ class ShadowLithEngine:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
             
         self.client = genai.Client(api_key=api_key)
-        self.model_id = "gemini-2.0-flash"
+        self.model_id = "gemini-2.5-flash-lite"
 
         # Advanced Block-based Schema for Premium UI Formatting
         self.system_instruction = (

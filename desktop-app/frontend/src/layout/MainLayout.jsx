@@ -13,8 +13,9 @@ import StrategyBlock from "../components/StrategyBlock"
 import InterviewBlock from "../components/InterviewBlock"
 import StepsBlock from "../components/StepsBlock"
 import OptionBlock from "../components/OptionBlock"
+import Select from "../components/Select"
 // ... imports
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { ChevronRight, Trash2, Send, Zap, X, GripHorizontal, Loader2, Minimize2, Terminal, MessageSquare, BookOpen, Sparkles, Camera, Mic, MonitorPlay, ChevronLeft, ChevronDown, ChevronUp, Ghost, Activity, Search, History, User } from "lucide-react"
 
 import ExplanationPanel from "./ExplanationPanel"
@@ -30,6 +31,7 @@ function MainLayout() {
     const [showChat, setShowChat] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [mode, setMode] = useState(null); // Assessment or Interview
+    const [language, setLanguage] = useState("Python");
     const [isInitialized, setIsInitialized] = useState(false);
     const [showSystemButtons, setShowSystemButtons] = useState(false);
     const [isHudMode, setIsHudMode] = useState(false);
@@ -44,6 +46,12 @@ function MainLayout() {
     // History System
     const [history, setHistory] = useState([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
+
+    // Chat Persistance
+    const [chatMessages, setChatMessages] = useState([
+        { role: "assistant", content: [{ type: 'text', content: "Hello!!" }] },
+        { role: "assistant", content: [{ type: 'text', content: "I’m here to support you through this assessment/interview. How can I help you right now?" }] }
+    ]);
 
     const navigateHistory = (direction) => {
         const newIndex = historyIndex + direction;
@@ -156,7 +164,7 @@ function MainLayout() {
         setExplanationData(null); // Clear both during processing
 
         try {
-            const rawResponse = await window.pywebview.api.get_answer(mode);
+            const rawResponse = await window.pywebview.api.get_answer(mode, language);
             try {
                 let parsed = JSON.parse(rawResponse);
                 if (typeof parsed === 'string') {
@@ -189,6 +197,10 @@ function MainLayout() {
                     setHistoryIndex(updated.length - 1);
                     return updated;
                 });
+
+                // Clear Buffer Logic (Backend & Frontend)
+                await window.pywebview.api.revoke_snip();
+                setCaptureCount(0);
 
             } catch (jsonError) {
                 setData({ explanation: rawResponse, code: null });
@@ -249,19 +261,23 @@ function MainLayout() {
         return <ModeSelection onSelect={(m) => { setMode(m); setIsInitialized(true); }} />
     }
 
+    const noPanel = !showAnswer && !showExplanation && !showChat;
+    const onlyOnePanel = (showAnswer && !showExplanation && !showChat) || (!showAnswer && showExplanation && !showChat) || (!showAnswer && !showExplanation && showChat);
+    const atleastTwoPanel = (showAnswer && showExplanation) || (showAnswer && showChat) || (showExplanation && showChat);
+
     return (
         <div id="main-layout-container" className="relative flex flex-col gap-2 h-screen bg-transparent overflow-hidden relative w-max">
 
 
             {/* --- TOP CONTROL BAR --- */}
-            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
+            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-50 relative pointer-events-auto">
                 <div className="flex items-center gap-3 pl-2 pointer-events-none">
                     <h1 className="text-sm font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-500">
                         SHADOWLITH
                     </h1>
                     {captureCount > 0 && (
                         <span className="bg-blue-900/50 text-blue-200 text-[10px] px-2 py-0.5 rounded-md border border-blue-500/20">
-                            {captureCount} Snippet{captureCount > 1 ? 's' : ''} in Buffer
+                            {captureCount} {captureCount > 1 ? 'Snippets' : 'Snippet'} {atleastTwoPanel && 'in Buffer'}
                         </span>
                     )}
 
@@ -291,7 +307,7 @@ function MainLayout() {
 
                 <div className="flex flex-row items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
                     {/* Mode Selector */}
-                    <div className="flex items-center bg-zinc-950/50 border border-zinc-800 rounded-md p-0.5 mr-2">
+                    <div className="flex items-center bg-zinc-950/50 border border-zinc-800 rounded-md p-0.5">
                         {["Assessment", "Interview"].map((m) => (
                             <button
                                 key={m}
@@ -306,13 +322,24 @@ function MainLayout() {
                         ))}
                     </div>
 
-                    <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-red-400 gap-1.5">Abort</Button>
+                    {/* Custom Select (ShadeCN Style) */}
+                    <Select
+                        value={language}
+                        onChange={setLanguage}
+                        options={["Python", "Java", "C++", "JavaScript", "Go", "Rust", "SQL"]}
+                        placeholder="Select"
+                    />
+
+
+
                     {showSystemButtons && (
                         <div className="flex items-center gap-0.5">
+                            {(!noPanel || !onlyOnePanel) && <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-red-400 gap-1.5">Abort</Button>}
                             <Button variant="ghost" onClick={handleHide} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">Hide</Button>
                             <Button variant="ghost" onClick={async () => window.pywebview && window.pywebview.api.terminate_app()} className="flex items-center text-zinc-500 hover:text-red-500 gap-1.5 px-2">Quit</Button>
                         </div>
                     )}
+
                     <div onClick={() => setShowSystemButtons(!showSystemButtons)} className="group flex items-center justify-center p-2 rounded-md bg-transparent hover:bg-zinc-800/50 cursor-pointer pointer-events-auto transition-colors duration-200">
                         <ChevronLeft size={14} className={`transition-all duration-300 transform ${showSystemButtons ? "text-zinc-500 rotate-180" : "text-zinc-400 rotate-0"} group-hover:text-white group-hover:scale-110`} />
                     </div>
@@ -329,7 +356,7 @@ function MainLayout() {
                         <Mic size={14} className="text-zinc-500" /> Listen
                     </Button>
                     <Button disabled variant="ghost" className="flex items-center text-zinc-400 hover:text-purple-400 gap-1.5 px-2">
-                        <MonitorPlay size={14} className="text-zinc-500" /> Analyse Screen
+                        <MonitorPlay size={14} className="text-zinc-500" /> Analyse {atleastTwoPanel && 'Panel'}
                     </Button>
                     <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-yellow-400 gap-1.5 px-2">
                         <Trash2 size={14} className="text-zinc-500" /> Clear
@@ -350,26 +377,56 @@ function MainLayout() {
             {mode !== 'Interview' && showHistory && history.length > 0 && (
                 <div className="flex flex-row justify-start items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2 border-r border-zinc-800 mr-2">Version History</span>
-                    <div className="flex flex-row gap-1.5 overflow-x-auto no-scrollbar">
-                        {history.map((item, idx) => (
-                            <button
-                                key={idx}
-                                onClick={() => {
-                                    setHistoryIndex(idx);
-                                    setData(item.data);
-                                    setExplanationData(item.explanationData);
-                                }}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono transition-all shrink-0 border ${historyIndex === idx
-                                    ? 'bg-blue-600/20 border-blue-500/50 text-blue-100 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
-                                    : 'bg-zinc-800/30 border-zinc-700/30 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
-                                    }`}
-                            >
-                                <span className={historyIndex === idx ? "text-blue-400" : "text-zinc-600"}>v{idx + 1}</span>
-                                <span className="max-w-[100px] truncate opacity-70">
-                                    {item.data?.summary || item.explanationData?.summary || "Analysis"}
-                                </span>
-                            </button>
-                        ))}
+                    <div className="flex flex-row gap-1.5 overflow-x-auto no-scrollbar items-center">
+                        {(() => {
+                            let pCounter = 0;
+                            let lastSummary = null;
+                            let vCounter = 0;
+
+                            return history.map((item, idx) => {
+                                const summary = item.data?.summary || item.explanationData?.summary || "Analysis";
+                                let isNewGroup = false;
+
+                                if (summary !== lastSummary) {
+                                    pCounter++;
+                                    vCounter = 1;
+                                    lastSummary = summary;
+                                    isNewGroup = true;
+                                } else {
+                                    vCounter++;
+                                }
+
+                                const label = `P${pCounter}`;
+                                const version = `v${vCounter}`;
+
+                                return (
+                                    <React.Fragment key={idx}>
+                                        {isNewGroup && idx > 0 && <div className="w-px h-6 bg-zinc-800 mx-1 shrink-0"></div>}
+                                        <button
+                                            onClick={() => {
+                                                setHistoryIndex(idx);
+                                                setData(item.data);
+                                                setExplanationData(item.explanationData);
+                                            }}
+                                            className={`flex flex-col items-start justify-center px-3 py-1 rounded-md text-xs font-mono transition-all shrink-0 border h-full min-w-[100px] ${historyIndex === idx
+                                                ? 'bg-blue-600/20 border-blue-500/50 text-blue-100 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
+                                                : 'bg-zinc-800/30 border-zinc-700/30 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                                                }`}
+                                        >
+                                            <div className="flex items-center justify-between w-full gap-2">
+                                                <span className={`text-[10px] font-bold ${historyIndex === idx ? "text-blue-400" : "text-zinc-600"}`}>
+                                                    {label} <span className="opacity-50 font-normal">. {version}</span>
+                                                </span>
+                                                {isNewGroup && <span className="w-1.5 h-1.5 rounded-full bg-blue-500/40"></span>}
+                                            </div>
+                                            <span className="max-w-[120px] truncate opacity-70 text-[10px] leading-tight">
+                                                {summary}
+                                            </span>
+                                        </button>
+                                    </React.Fragment>
+                                );
+                            });
+                        })()}
                     </div>
                 </div>
             )}
@@ -379,22 +436,32 @@ function MainLayout() {
                 <ExplanationPanel
                     showExplanation={showExplanation}
                     setShowExplanation={setShowExplanation}
+                    showAnswer={showAnswer}
+                    showChat={showChat}
                     explanationData={explanationData}
                     renderBlocks={renderBlocks}
                     renderHeaderBadges={renderHeaderBadges}
+                    isProcessing={isProcessing}
                 />
 
                 <SolutionPanel
                     showAnswer={showAnswer}
                     setShowAnswer={setShowAnswer}
+                    showExplanation={showExplanation}
+                    showChat={showChat}
                     data={data}
                     renderBlocks={renderBlocks}
                     renderHeaderBadges={renderHeaderBadges}
+                    isProcessing={isProcessing}
                 />
 
                 <ChatPanel
                     showChat={showChat}
                     setShowChat={setShowChat}
+                    showExplanation={showExplanation}
+                    showAnswer={showAnswer}
+                    messages={chatMessages}
+                    setMessages={setChatMessages}
                 />
             </div>
         </div>

@@ -92,13 +92,14 @@ class ShadowLithAPI:
                     if win_engine:
                         text = win_engine.run_ocr(SNIP_PATH)
                         if text:
+                            print(f"DEBUG: WinOCR Success | Length: {len(text)} chars | Text Preview: {text[:50]}...")
                             self.buffer_text.append(text)
                             if self._window: self._window.show()
                             return {"status": "success", "count": len(self.buffer_text)}
                         else:
-                            print("WinOCR returned no text.")
+                            print("DEBUG: WinOCR returned empty string.")
                     else:
-                        print("WinEngine not loaded.")
+                        print("DEBUG: WinOCR Engine not initialized.")
                 else:
                     # Linux Tesseract
                     success = self.buffer.add(SNIP_PATH)
@@ -110,14 +111,16 @@ class ShadowLithAPI:
             return {"status": "error", "message": "No text detected."}
         
         except Exception as e:
-            print(f"Capture Exception: {e}")
+            print(f"DEBUG: Capture Exception: {e}")
             if self._window: self._window.show()
             return {"status": "error", "message": str(e)}
 
-    def get_answer(self, mode="Assessment"):
+    def get_answer(self, mode="Assessment", language="Python"):
+        print(f"DEBUG: Processing Request | Mode: {mode} | Language: {language} | Buffer Count: {len(self.buffer_text)}")
         if sys.platform == "win32":
             text = "\n\n".join(self.buffer_text)
             if not text.strip():
+                 print("DEBUG: Buffer is empty, aborting request.")
                  return '{"type": "error", "explanation": "Buffer empty"}'
         else:
             text = self.buffer.get_full_text()
@@ -125,14 +128,37 @@ class ShadowLithAPI:
                  return '{"type": "error", "explanation": "Buffer empty"}'
                  
         # Prepend mode context if provided
-        full_query = f"MODE: {mode}\n\nCONTENT:\n{text}"
-        return self.engine.ask(full_query)
+        full_query = f"MODE: {mode}\nLANGUAGE: {language}\n\nCONTENT:\n{text}"
+        
+        print("DEBUG: Sending Query to Gemini...")
+        response = self.engine.ask(full_query)
+        
+        print("-" * 40)
+        print("DEBUG: RAW GEMINI RESPONSE:")
+        print(response)
+        print("-" * 40)
+        
+        return response
 
+    
     def chat(self, message):
-        """Send a message to the persistent chat session."""
+        """Send a message to the persistent chat session with condensed instruction."""
+        print(f"DEBUG: Chat Message Received: {message}")
         if not message.strip():
             return '{"type": "error", "explanation": "Empty message"}'
-        return self.engine.ask(message)
+            
+        # Wrap user message to enforce JSON behavior even in chat
+        chat_prompt = (
+            f"USER_CHAT: {message}\n"
+            "INSTRUCTION: Reply nicely and concisely. You are chatting with the user about the previous problem. "
+            "Output a single valid JSON object with a 'blocks' array. "
+            "Use 'text' blocks for explanation and 'code' blocks for any code examples requested."
+        )
+        
+        print("DEBUG: Sending Chat Query to Gemini...")
+        response = self.engine.ask(chat_prompt)
+        print(f"DEBUG: Chat Response: {response}")
+        return response
 
     def revoke_snip(self):
         if sys.platform == "win32":
@@ -259,7 +285,7 @@ def start_app():
     # URL Logic
     file_path = os.path.join(BASE_DIR, "ui", "index.html")
     if os.getenv("SHADOWLITH_DEBUG"):
-        url = os.getenv("SHADOWLITH_DEBUG_URL", "http://localhost:5174")
+        url = os.getenv("SHADOWLITH_DEBUG_URL")
         print(f"Debug Mode: {url}")
     elif os.path.exists(file_path):
         url = file_path

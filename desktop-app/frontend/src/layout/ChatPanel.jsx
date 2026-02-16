@@ -2,9 +2,10 @@ import React from 'react';
 import { MessageSquare, ChevronLeft } from 'lucide-react';
 import ChatWindow from "../components/ChatWindow";
 
-const ChatPanel = ({ showChat, setShowChat }) => {
+const ChatPanel = ({ showChat, setShowChat, showExplanation, showAnswer, messages, setMessages }) => {
+    const onlyChat = !showExplanation && !showAnswer;
     return (
-        <div className={`flex flex-col transition-all duration-300 ${showChat ? 'w-[400px] pointer-events-auto' : 'w-12 shrink-0 pointer-events-auto'} bg-[#030303] border border-zinc-800 rounded-md overflow-hidden min-w-0`}>
+        <div className={`flex flex-col transition-all duration-300 ${showChat ? (!onlyChat ? 'w-[400px] pointer-events-auto' : 'w-[415px]') : 'w-12 shrink-0 pointer-events-auto'} bg-[#030303] border border-zinc-800 rounded-md overflow-hidden min-w-0`}>
             <div
                 className={`flex items-center ${showChat ? 'justify-between' : 'justify-center'} p-3 border-b border-zinc-800 bg-zinc-900/50 cursor-pointer hover:bg-zinc-800/50 transition-colors`}
                 onClick={() => setShowChat(!showChat)}
@@ -19,7 +20,7 @@ const ChatPanel = ({ showChat, setShowChat }) => {
             </div>
             {showChat && (
                 <div className="flex-1 overflow-hidden h-full">
-                    <ChatWindow />
+                    <ChatWindow messages={messages} setMessages={setMessages} />
                 </div>
             )}
         </div>

@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Send, Bot, User, Trash2 } from "lucide-react";
 import Button from "./Button";
+import CodeBlock from "./CodeBlock";
 
-function ChatWindow() {
+function ChatWindow({ messages, setMessages }) {
     const [input, setInput] = useState("");
-    const [messages, setMessages] = useState([
-        { role: "assistant", content: "Hello!!" },
-        { role: "assistant", content: "I’m here to support you through this assessment/interview. How can I help you right now?" }
-    ]);
+    // messages state lifted to MainLayout
     const messagesEndRef = useRef(null);
 
     const scrollToBottom = () => {
@@ -31,33 +29,46 @@ function ChatWindow() {
 
         try {
             if (window.pywebview) {
+                // Call Python Backend
                 const rawResponse = await window.pywebview.api.chat(userMsg);
-                let parsed = JSON.parse(rawResponse);
 
-                // If it's a string disguised as JSON
+                // Parse the structured JSON response
+                let parsed;
+                try {
+                    parsed = JSON.parse(rawResponse);
+                } catch (e) {
+                    // Handle case where raw string is returned
+                    parsed = { blocks: [{ type: 'text', content: rawResponse }] };
+                }
+
                 if (typeof parsed === 'string') {
                     const cleaned = parsed.replace(/```json/g, '').replace(/```/g, '').trim();
                     parsed = JSON.parse(cleaned);
                 }
 
-                // Extract text from blocks
-                const aiText = parsed.blocks
-                    ?.filter(b => b.type === 'text')
-                    ?.map(b => b.content)
-                    ?.join('\n\n') || "I processed that, but had no text response.";
+                // Extract relevant blocks for chat
+                // We now include 'code' blocks to support the user's request
+                const aiBlocks = parsed.blocks
+                    ?.filter(b => ['text', 'code', 'section', 'strategy'].includes(b.type))
+                    ?.map(b => ({
+                        type: b.type,
+                        content: b.content,
+                        lang: b.lang
+                    })) || [{ type: 'text', content: "I processed that, but had no text response." }];
 
                 setMessages(prev => [...prev, {
                     role: "assistant",
-                    content: aiText
+                    content: aiBlocks // Store array of blocks
                 }]);
             } else {
-                // Fallback for dev mode without backend
+                // Fallback for dev mode
                 setTimeout(() => {
                     setMessages(prev => [...prev, {
                         role: "assistant",
-                        content: "ShadowLith backend not connected. This is a local simulated response."
+                        content: "(Dev Mode) Echo: " + userMsg
                     }]);
-                }, 600);
+                    setIsTyping(false);
+                }, 1000);
             }
         } catch (error) {
             console.error("Chat Error:", error);
@@ -92,19 +103,43 @@ function ChatWindow() {
                 {messages.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div
-                            className={`max-w-[85%] rounded-md px-3 py-2 text-sm leading-relaxed ${msg.role === 'user'
-                                ? 'bg-blue-600/20 text-blue-100 border border-blue-500/20'
-                                : 'bg-zinc-800/50 text-zinc-300 border border-zinc-700/50'
+                            className={`rounded-md text-sm leading-relaxed ${msg.role === 'user'
+                                ? 'bg-blue-600/20 text-blue-100 border border-blue-500/20 max-w-[85%] px-3 py-2'
+                                : 'bg-transparent text-zinc-300 w-full'
                                 }`}
                         >
-                            {msg.content}
+                            {/* Check if content is an array of blocks (New Structure) */}
+                            {Array.isArray(msg.content) ? (
+                                <div className="flex flex-col max-w-[95%]">
+                                    {msg.content.map((block, bIdx) => {
+                                        if (block.type === 'code') {
+                                            return (
+                                                <div key={bIdx} className="w-full ">
+                                                    <CodeBlock code={block.content} language={block.lang || 'javascript'} />
+                                                </div>
+                                            );
+                                        }
+                                        // Default to text (Styled as a bubble)
+                                        return (
+                                            <div key={bIdx} className="bg-zinc-800/50 border border-zinc-700/50 rounded-md px-3 py-2 whitespace-pre-wrap ">
+                                                {block.content}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                // Fallback for legacy string messages
+                                <span className="whitespace-pre-wrap">{msg.content}</span>
+                            )}
                         </div>
                     </div>
                 ))}
                 {isTyping && (
-                    <div className="flex justify-start">
-                        <div className="bg-zinc-800/30 text-zinc-500 border border-zinc-700/30 rounded-md px-3 py-1 text-[10px] animate-pulse">
-                            ShadowLith is thinking...
+                    <div className="flex justify-start ml-1">
+                        <div className="flex items-center gap-1 bg-zinc-800/40 border border-zinc-700/40 rounded-md px-3 py-4 w-fit">
+                            <div className="w-1.5 h-1.5 bg-zinc-200 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                            <div className="w-1.5 h-1.5 bg-zinc-200 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                            <div className="w-1.5 h-1.5 bg-zinc-200 rounded-full animate-bounce"></div>
                         </div>
                     </div>
                 )}
