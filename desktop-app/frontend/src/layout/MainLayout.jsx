@@ -7,86 +7,194 @@
 import Button from "../components/Button"
 import TextBlock from "../components/TextBlock"
 import CodeBlock from "../components/CodeBlock"
+import AnalysisBlock from "../components/AnalysisBlock"
+import ProblemBlock from "../components/ProblemBlock"
+import StrategyBlock from "../components/StrategyBlock"
+import InterviewBlock from "../components/InterviewBlock"
+import StepsBlock from "../components/StepsBlock"
+import OptionBlock from "../components/OptionBlock"
+// ... imports
 import { useState, useEffect } from "react"
-import { ChevronRight, Trash2, Send, Zap, X, GripHorizontal, Loader2, Minimize2, Terminal } from "lucide-react"
+import { ChevronRight, Trash2, Send, Zap, X, GripHorizontal, Loader2, Minimize2, Terminal, MessageSquare, BookOpen, Sparkles, Camera, Mic, MonitorPlay, ChevronLeft, ChevronDown, ChevronUp, Ghost, Activity, Search, History, User } from "lucide-react"
+
+import ExplanationPanel from "./ExplanationPanel"
+import SolutionPanel from "./SolutionPanel"
+import ChatPanel from "./ChatPanel"
+
+import { MOCK_MCQ_ANSWER, MOCK_MCQ_EXPLANATION, MOCK_HISTORY } from "../utils/constants"
+import ModeSelection from "./ModeSelection"
 
 function MainLayout() {
     const [showExplanation, setShowExplanation] = useState(true);
     const [showAnswer, setShowAnswer] = useState(true);
+    const [showChat, setShowChat] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [mode, setMode] = useState(null); // Assessment or Interview
+    const [isInitialized, setIsInitialized] = useState(false);
+    const [showSystemButtons, setShowSystemButtons] = useState(false);
+    const [isHudMode, setIsHudMode] = useState(false);
+    const [isGhostMode, setIsGhostMode] = useState(false);
 
     // Core State
     const [data, setData] = useState(null);
+    const [explanationData, setExplanationData] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [captureCount, setCaptureCount] = useState(0);
 
-    const renderContent = (contentData) => {
-        if (!contentData) return <div className="text-zinc-500 italic p-4">Ready to process...</div>;
+    // History System
+    const [history, setHistory] = useState([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
 
-        return Object.entries(contentData).map(([key, value]) => {
-            if (!value) return null;
+    const navigateHistory = (direction) => {
+        const newIndex = historyIndex + direction;
+        if (newIndex >= 0 && newIndex < history.length) {
+            setHistoryIndex(newIndex);
+            const version = history[newIndex];
+            setData(version.data);
+            setExplanationData(version.explanationData);
+        }
+    };
 
-            if (key.startsWith('text') || key === 'explanation' || key === 'option') {
-                return <TextBlock key={key}>{value}</TextBlock>;
+    useEffect(() => {
+        const checkBuffer = async () => {
+            if (window.pywebview) {
+                // Initial sync could go here
             }
+        };
+        checkBuffer();
+    }, []);
 
-            if (key.startsWith('code')) {
-                return <CodeBlock key={key} code={value} />;
+    const toggleHud = async () => {
+        const nextMode = !isHudMode;
+        setIsHudMode(nextMode);
+        if (window.pywebview) {
+            if (nextMode) {
+                await window.pywebview.api.resize_window(1200, 62);
+            } else {
+                await window.pywebview.api.resize_window(1200, 850);
             }
+        }
+    };
 
-            return null;
+    const toggleGhost = async () => {
+        const nextMode = !isGhostMode;
+        setIsGhostMode(nextMode);
+        if (window.pywebview) {
+            await window.pywebview.api.set_ghost_mode(nextMode);
+        }
+    };
+
+    const renderBlocks = (blocks) => {
+        if (!blocks || !Array.isArray(blocks)) return null;
+
+        return blocks.map((block, idx) => {
+            switch (block.type) {
+                case 'text':
+                    return <TextBlock key={idx}>{block.content}</TextBlock>;
+                case 'code':
+                    return <CodeBlock key={idx} code={block.content} lang={block.lang || 'javascript'} />;
+                case 'option':
+                    return <OptionBlock key={idx} label={block.label} content={block.content} />;
+                case 'analysis':
+                    return (
+                        <AnalysisBlock
+                            key={idx}
+                            time={block.time}
+                            space={block.space}
+                            complexityLabel={block.label}
+                        />
+                    );
+                case 'interview':
+                    if (mode === 'Assessment') return null;
+                    return <InterviewBlock key={idx} content={block.content} />;
+                case 'problem':
+                    return <ProblemBlock key={idx} content={block.content} />;
+                case 'strategy':
+                    return <StrategyBlock key={idx} content={block.content} />;
+                case 'step':
+                    if (idx > 0 && blocks[idx - 1].type === 'step') return null;
+                    const stepGroup = [];
+                    let currentIdx = idx;
+                    while (currentIdx < blocks.length && blocks[currentIdx].type === 'step') {
+                        stepGroup.push(blocks[currentIdx]);
+                        currentIdx++;
+                    }
+                    return <StepsBlock key={idx} steps={stepGroup} />;
+                default:
+                    return null;
+            }
         });
     };
 
-    // --- API HANDLERS ---
+    const renderHeaderBadges = (item) => {
+        if (!item) return null;
+        return (
+            <div className="flex flex-wrap gap-2 mb-4">
+                {item.summary && (
+                    <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] uppercase font-bold tracking-wider">
+                        {item.summary}
+                    </span>
+                )}
+            </div>
+        );
+    };
 
     const handleCapture = async () => {
-        if (!window.pywebview) {
-            console.error("ShadowLith Backend not connected via pywebview.");
-            return;
-        }
+        if (!window.pywebview) return;
         try {
             const res = await window.pywebview.api.capture();
-            if (res.status === 'success') {
-                setCaptureCount(res.count);
-            } else {
-                console.warn("Capture failed:", res.message);
-            }
+            if (res.status === 'success') setCaptureCount(res.count);
         } catch (e) {
-            console.error("Capture Error:", e);
+            console.error(e);
         }
     };
 
     const handleProcess = async () => {
         if (!window.pywebview) return;
-
         setIsProcessing(true);
-        setData(null); // Clear previous result while thinking
+        setData(null);
+        setExplanationData(null); // Clear both during processing
 
         try {
-            // rawResponse is a JSON string from Python
-            const rawResponse = await window.pywebview.api.get_answer();
+            const rawResponse = await window.pywebview.api.get_answer(mode);
             try {
-                // Robust JSON parsing
                 let parsed = JSON.parse(rawResponse);
-
-                // If the response is wrapped in code blocks (common LLM artifact), clean it
                 if (typeof parsed === 'string') {
                     const cleaned = parsed.replace(/```json/g, '').replace(/```/g, '').trim();
                     parsed = JSON.parse(cleaned);
                 }
 
-                setData(parsed);
-            } catch (jsonError) {
-                // Fallback if Gemini returns raw text instead of JSON
-                console.warn("JSON Parse Failed, falling back to raw text", jsonError);
-                setData({
-                    explanation: rawResponse,
-                    code: null
+                // SPLIT LOGIC: Send blocks to correct panels
+                const explanationTypes = ['problem', 'strategy', 'interview'];
+                const solutionTypes = ['code', 'step', 'option', 'analysis', 'text', 'warning'];
+
+                const explanationBlocks = parsed.blocks?.filter(b => explanationTypes.includes(b.type)) || [];
+                const solutionBlocks = parsed.blocks?.filter(b => solutionTypes.includes(b.type)) || [];
+
+                const newExpl = {
+                    ...parsed,
+                    blocks: explanationBlocks
+                };
+                const newSol = {
+                    ...parsed,
+                    blocks: solutionBlocks
+                };
+
+                setExplanationData(newExpl);
+                setData(newSol);
+
+                // Update History
+                setHistory(prev => {
+                    const updated = [...prev, { explanationData: newExpl, data: newSol }];
+                    setHistoryIndex(updated.length - 1);
+                    return updated;
                 });
+
+            } catch (jsonError) {
+                setData({ explanation: rawResponse, code: null });
             }
         } catch (e) {
-            console.error("Process Error:", e);
-            setData({ explanation: `Error processing request: ${e}` });
+            setData({ explanation: `Error: ${e}` });
         } finally {
             setIsProcessing(false);
         }
@@ -96,125 +204,201 @@ function MainLayout() {
         if (window.pywebview) await window.pywebview.api.revoke_snip();
         setCaptureCount(0);
         setData(null);
+        setExplanationData(null);
+        setHistory([]);
+        setHistoryIndex(-1);
     };
 
     const handleHide = async () => {
         if (window.pywebview) await window.pywebview.api.hide_ui();
     };
 
+    // --- RESIZE OBSERVER LOGIC ---
+    // This effect watches the root container's size and syncs it with the OS window
+    useEffect(() => {
+        if (!window.pywebview) return;
+
+        const syncSize = () => {
+            const container = document.getElementById('main-layout-container');
+            if (container) {
+                // Get the full scroll width/height of the layout
+                const width = container.scrollWidth;
+                const height = container.scrollHeight;
+
+                // Add a small buffer to prevent scrollbars or clipping
+                window.pywebview.api.sync_window_size(width + 2, 800);
+            }
+        };
+
+        // Create observer
+        const observer = new ResizeObserver(() => {
+            // Debounce slightly or use requestAnimationFrame if needed, 
+            // but direct call is usually fine for this scale
+            requestAnimationFrame(syncSize);
+        });
+
+        const target = document.getElementById('main-layout-container');
+        if (target) {
+            observer.observe(target);
+        }
+
+        return () => observer.disconnect();
+    }, [showExplanation, showAnswer, showChat, showHistory, isHudMode, mode]); // Re-bind on layout changes
+
+    if (!isInitialized) {
+        return <ModeSelection onSelect={(m) => { setMode(m); setIsInitialized(true); }} />
+    }
+
     return (
-        <div className="flex flex-col gap-2 w-screen h-screen bg-transparent p-1 overflow-hidden">
+        <div id="main-layout-container" className="relative flex flex-col gap-2 h-screen bg-transparent overflow-hidden relative w-max">
+
 
             {/* --- TOP CONTROL BAR --- */}
-            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-zinc-900 border border-zinc-800 rounded-lg select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-move">
+            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
                 <div className="flex items-center gap-3 pl-2 pointer-events-none">
-                    <GripHorizontal className="text-zinc-600" size={20} />
-                    <span className="font-mono font-bold text-sm tracking-tighter uppercase text-zinc-100">ShadowLith // </span>
+                    <h1 className="text-sm font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-500">
+                        SHADOWLITH
+                    </h1>
                     {captureCount > 0 && (
-                        <span className="bg-blue-900/50 text-blue-200 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/20">
+                        <span className="bg-blue-900/50 text-blue-200 text-[10px] px-2 py-0.5 rounded-md border border-blue-500/20">
                             {captureCount} Snippet{captureCount > 1 ? 's' : ''} in Buffer
                         </span>
                     )}
+
+                    {/* History Navigation */}
+                    {mode !== 'Interview' && history.length > 1 && (
+                        <div className="flex items-center gap-2 bg-zinc-800/50 px-2 py-0.5 rounded-md border border-zinc-700/50 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
+                            <button
+                                onClick={() => navigateHistory(-1)}
+                                disabled={historyIndex <= 0}
+                                className={`p-0.5 transition-colors ${historyIndex <= 0 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-400 hover:text-zinc-100'}`}
+                            >
+                                <ChevronLeft size={12} />
+                            </button>
+                            <span className="text-[10px] font-mono text-zinc-500 select-none">
+                                v{historyIndex + 1}/{history.length}
+                            </span>
+                            <button
+                                onClick={() => navigateHistory(1)}
+                                disabled={historyIndex >= history.length - 1}
+                                className={`p-0.5 transition-colors ${historyIndex >= history.length - 1 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-400 hover:text-zinc-100'}`}
+                            >
+                                <ChevronRight size={12} />
+                            </button>
+                        </div>
+                    )}
                 </div>
 
-                <div className="flex flex-row items-center gap-4">
-                    <div className="flex gap-2" onMouseDown={(e) => e.stopPropagation()}>
-                        <Button variant="" onClick={handleCapture} className="bg-zinc-500/10 text-zinc-300/90 border-zinc-500/20 hover:bg-zinc-500/30 hover:text-zinc-100 text-xs px-3 py-1.5 flex items-center gap-1 ">
-                            <Zap size={14} /> Capture
-                        </Button>
-                        <Button variant="" onClick={handleClear} className="bg-yellow-500/5 text-yellow-400/90 border-yellow-500/20 hover:bg-yellow-500/20 text-xs px-3 py-1.5 flex items-center gap-1">
-                            <Trash2 size={14} /> Clear
-                        </Button>
-                        <Button
-                            variant=""
-                            onClick={handleProcess}
-                            disabled={isProcessing || captureCount === 0}
-                            className={`bg-emerald-500/10 text-emerald-400/90 border-emerald-500/20 hover:bg-emerald-500/20 hover:text-emerald-100 text-xs px-3 py-1.5 flex items-center gap-1 ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                            {isProcessing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                            {isProcessing ? 'Thinking...' : 'Process'}
-                        </Button>
-                        <Button variant="" onClick={handleHide} className="bg-zinc-500/10 text-zinc-400 border-zinc-500/20 hover:bg-zinc-500/20 hover:text-zinc-100 text-xs px-3 py-1.5 flex items-center gap-1">
-                            <Minimize2 size={14} /> Hide
-                        </Button>
-                        <Button variant="" onClick={handleClear} className="bg-red-500/20 text-red-400/90 border-red-500/20 hover:bg-red-500/20 hover:text-red-500 text-xs px-3 py-1.5 flex items-center gap-1">
-                            <X size={14} /> Abort
-                        </Button>
+                <div className="flex flex-row items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
+                    {/* Mode Selector */}
+                    <div className="flex items-center bg-zinc-950/50 border border-zinc-800 rounded-md p-0.5 mr-2">
+                        {["Assessment", "Interview"].map((m) => (
+                            <button
+                                key={m}
+                                onClick={() => setMode(m)}
+                                className={`px-2 py-1 text-[10px] rounded-[4px] transition-all duration-200 ${mode === m
+                                    ? "bg-zinc-800 text-zinc-100 shadow-sm"
+                                    : "text-zinc-500 hover:text-zinc-300"
+                                    }`}
+                            >
+                                {m}
+                            </button>
+                        ))}
+                    </div>
+
+                    <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-red-400 gap-1.5">Abort</Button>
+                    {showSystemButtons && (
+                        <div className="flex items-center gap-0.5">
+                            <Button variant="ghost" onClick={handleHide} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">Hide</Button>
+                            <Button variant="ghost" onClick={async () => window.pywebview && window.pywebview.api.terminate_app()} className="flex items-center text-zinc-500 hover:text-red-500 gap-1.5 px-2">Quit</Button>
+                        </div>
+                    )}
+                    <div onClick={() => setShowSystemButtons(!showSystemButtons)} className="group flex items-center justify-center p-2 rounded-md bg-transparent hover:bg-zinc-800/50 cursor-pointer pointer-events-auto transition-colors duration-200">
+                        <ChevronLeft size={14} className={`transition-all duration-300 transform ${showSystemButtons ? "text-zinc-500 rotate-180" : "text-zinc-400 rotate-0"} group-hover:text-white group-hover:scale-110`} />
                     </div>
                 </div>
             </div>
+
+            {/* CONTROL BAR */}
+            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
+                <div className="flex flex-row items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" onClick={handleCapture} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">
+                        <Camera size={14} className="text-zinc-500" /> Capture
+                    </Button>
+                    <Button disabled variant="ghost" className="flex items-center text-zinc-400 hover:text-blue-400 gap-1.5 px-2">
+                        <Mic size={14} className="text-zinc-500" /> Listen
+                    </Button>
+                    <Button disabled variant="ghost" className="flex items-center text-zinc-400 hover:text-purple-400 gap-1.5 px-2">
+                        <MonitorPlay size={14} className="text-zinc-500" /> Analyse Screen
+                    </Button>
+                    <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-yellow-400 gap-1.5 px-2">
+                        <Trash2 size={14} className="text-zinc-500" /> Clear
+                    </Button>
+                    {mode !== 'Interview' && (
+                        <Button variant="ghost" onClick={() => setShowHistory(!showHistory)} className={`flex items-center gap-1.5 px-2 transition-all ${showHistory ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-400 hover:text-blue-400'}`}>
+                            <History size={14} className={showHistory ? "text-blue-400" : "text-zinc-500"} /> History
+                        </Button>
+                    )}
+                    <Button variant="ghost" onClick={handleProcess} disabled={isProcessing || captureCount === 0} className={`flex items-center gap-1.5 px-2 ${isProcessing ? 'text-zinc-600' : 'text-zinc-400 hover:text-emerald-400'}`}>
+                        {isProcessing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} className="text-zinc-500" />}
+                        {isProcessing ? 'Thinking...' : 'Process'}
+                    </Button>
+                </div>
+            </div>
+
+            {/* --- HISTORY TIMELINE --- */}
+            {mode !== 'Interview' && showHistory && history.length > 0 && (
+                <div className="flex flex-row justify-start items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2 border-r border-zinc-800 mr-2">Version History</span>
+                    <div className="flex flex-row gap-1.5 overflow-x-auto no-scrollbar">
+                        {history.map((item, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => {
+                                    setHistoryIndex(idx);
+                                    setData(item.data);
+                                    setExplanationData(item.explanationData);
+                                }}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono transition-all shrink-0 border ${historyIndex === idx
+                                    ? 'bg-blue-600/20 border-blue-500/50 text-blue-100 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
+                                    : 'bg-zinc-800/30 border-zinc-700/30 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                                    }`}
+                            >
+                                <span className={historyIndex === idx ? "text-blue-400" : "text-zinc-600"}>v{idx + 1}</span>
+                                <span className="max-w-[100px] truncate opacity-70">
+                                    {item.data?.summary || item.explanationData?.summary || "Analysis"}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* --- MAIN CONTENT AREA --- */}
-            <div className={`flex flex-row flex-1 w-full gap-2 overflow-hidden text-sm min-h-0 opacity-90 transition-opacity duration-300 ${isProcessing ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div className={`flex flex-row flex-1 gap-2 text-sm min-h-0 opacity-98 transition-opacity duration-300 ${isProcessing ? 'opacity-50 pointer-events-none' : ''} z-0 relative`}>
+                <ExplanationPanel
+                    showExplanation={showExplanation}
+                    setShowExplanation={setShowExplanation}
+                    explanationData={explanationData}
+                    renderBlocks={renderBlocks}
+                    renderHeaderBadges={renderHeaderBadges}
+                />
 
-                {/* LEFT: EXPLANATION / CONTEXT */}
-                <div className={`flex flex-col transition-all duration-300 ${showExplanation ? 'w-1/2' : 'w-12'} bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden min-w-0 `}>
-                    <div
-                        className="flex items-center justify-between p-3 border-b border-zinc-800 bg-zinc-900/50 cursor-pointer hover:bg-zinc-800/50 transition-colors"
-                        onClick={() => setShowExplanation(!showExplanation)}
-                    >
-                        <div className="flex items-center gap-2 text-zinc-400">
-                            <span className="font-bold uppercase tracking-wider text-xs text-zinc-300">{showExplanation ? "Explanation" : "E"}</span>
-                        </div>
-                        <ChevronRight className={`w-4 h-4 text-zinc-300 transition-transform duration-200 ${showExplanation ? 'rotate-180' : 'rotate-0'}`} />
-                    </div>
+                <SolutionPanel
+                    showAnswer={showAnswer}
+                    setShowAnswer={setShowAnswer}
+                    data={data}
+                    renderBlocks={renderBlocks}
+                    renderHeaderBadges={renderHeaderBadges}
+                />
 
-                    {showExplanation && (
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 thin-scrollbar">
-                            {/* Render Explanation/Text parts specifically if structured, else all text */}
-                            {data ? (
-                                <>
-                                    {data.option && <TextBlock className="text-xl font-bold text-blue-400 mb-4">{data.option}</TextBlock>}
-                                    {data.explanation && <TextBlock>{data.explanation}</TextBlock>}
-                                    {/* Fallback for undefined keys that are text */}
-                                    {Object.entries(data).map(([k, v]) => k.startsWith('text') ? <TextBlock key={k}>{v}</TextBlock> : null)}
-                                </>
-                            ) : (
-                                <div className="flex items-center justify-center h-full text-zinc-600">
-                                    <div className="text-center">
-                                        <p>No Context Loaded</p>
-                                        <p className="text-xs opacity-50">Capture a region to begin</p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* RIGHT: ANSWER / OUTPUT */}
-                <div className={`flex flex-col transition-all duration-300 ${showAnswer ? 'w-1/2' : 'w-12'} bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden min-w-0 `}>
-                    <div
-                        className="flex items-center justify-between p-3 border-b border-zinc-800 bg-zinc-900/50 cursor-pointer hover:bg-zinc-900 transition-colors"
-                        onClick={() => setShowAnswer(!showAnswer)}
-                    >
-                        <div className="flex items-center gap-2 text-emerald-500">
-                            <span className="font-bold uppercase tracking-wider text-xs">{showAnswer ? "Solution" : "S"}</span>
-                        </div>
-                        <ChevronRight className={`w-4 h-4 text-emerald-300 transition-transform duration-200 ${showAnswer ? 'rotate-180' : 'rotate-0'}`} />
-                    </div>
-
-                    {showAnswer && (
-                        <div className="flex-1 overflow-y-auto p-4 space-y-6 thin-scrollbar">
-                            {data && data.code ? (
-                                <CodeBlock code={data.code} />
-                            ) : (
-                                data && !data.code && data.explanation ? (
-                                    <div className="flex items-center justify-center h-full text-zinc-500 italic">
-                                        No code in solution. See explanation.
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center justify-center h-full text-emerald-900/30">
-                                        <Terminal size={48} />
-                                    </div>
-                                )
-                            )}
-                        </div>
-                    )}
-                </div>
-
+                <ChatPanel
+                    showChat={showChat}
+                    setShowChat={setShowChat}
+                />
             </div>
         </div>
-    )
+    );
 }
 
-export default MainLayout
+export default MainLayout;

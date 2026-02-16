@@ -1,11 +1,17 @@
-import os
 import sys
+import os
+
+# Set WebView2 Background to Transparent (0) BEFORE importing webview
+if sys.platform == "win32":
+    # Fallback to Black (FF000000 AARRGGBB) to prevent White Flash if transparency fails
+    os.environ['WEBVIEW2_DEFAULT_BACKGROUND_COLOR'] = 'FF000000'
+
 import webview
 import subprocess
 import time
 from pynput import keyboard
 from screeninfo import get_monitors
-from src.engine.gemini import NyxEngine
+from src.engine.gemini import ShadowLithEngine
 
 # Platform specific imports & Engine Setup
 if sys.platform == "win32":
@@ -108,7 +114,7 @@ class ShadowLithAPI:
             if self._window: self._window.show()
             return {"status": "error", "message": str(e)}
 
-    def get_answer(self):
+    def get_answer(self, mode="Assessment"):
         if sys.platform == "win32":
             text = "\n\n".join(self.buffer_text)
             if not text.strip():
@@ -118,13 +124,22 @@ class ShadowLithAPI:
             if not text:
                  return '{"type": "error", "explanation": "Buffer empty"}'
                  
-        return self.engine.ask(text)
+        # Prepend mode context if provided
+        full_query = f"MODE: {mode}\n\nCONTENT:\n{text}"
+        return self.engine.ask(full_query)
+
+    def chat(self, message):
+        """Send a message to the persistent chat session."""
+        if not message.strip():
+            return '{"type": "error", "explanation": "Empty message"}'
+        return self.engine.ask(message)
 
     def revoke_snip(self):
         if sys.platform == "win32":
             self.buffer_text = []
         else:
             self.buffer.clear()
+        self.engine.reset()
         return "Cleared"
 
     def hide_ui(self):
@@ -134,15 +149,48 @@ class ShadowLithAPI:
             is_visible = False
         return "Hidden"
 
+    def resize_window(self, width, height):
+        """Resize the native OS window."""
+        if self._window:
+            self._window.resize(width, height)
+        return f"Resized to {width}x{height}"
+
+    def sync_window_size(self, width, height):
+        """Called by the frontend ResizeObserver to sync native window."""
+        if self._window:
+            # Enforce Hard Constraints: Min 150px (Collapsed), Max 1400px (Full)
+            clamped_width = max(150, min(1400, int(width)))
+            # Height is FIXED at 800px
+            self._window.resize(clamped_width, 800)
+        return "Synced"
+
+    def set_ghost_mode(self, enable):
+        """Toggle click-through (Ghost Mode) via the UI."""
+        if sys.platform == 'win32' and win_engine:
+            hwnd = get_hwnd(self._window)
+            win_engine.set_click_through(hwnd, enable)
+            return f"Ghost Mode: {enable}"
+        return "Not Supported on this Platform"
+
+    def terminate_app(self):
+        """Cleanly exit the application."""
+        if self._window:
+            self._window.destroy()
+        sys.exit(0)
+
 def get_hwnd(window):
     """Retrieve HWND in a cross-platform way for Windows."""
     try:
-        # 1. Native Handle (common in newer pywebview / DotNet)
+        # 1. Qt Backend (winId)
+        if hasattr(window, 'native') and hasattr(window.native, 'winId'):
+             return int(window.native.winId())
+             
+        # 2. .NET/Edge Backend (Handle)
         if hasattr(window, 'native') and hasattr(window.native, 'Handle'):
             # It might be an IntPtr
             return int(window.native.Handle)
         
-        # 2. Window Title Search (Fallback)
+        # 3. Window Title Search (Fallback)
         # Note: If multiple windows have same title, this could be risky, but unlikely for this app.
         if sys.platform == "win32":
             hwnd = ctypes.windll.user32.FindWindowW(None, "ShadowLith")
@@ -160,6 +208,30 @@ def apply_stealth_hints(window):
         if win_engine:
             hwnd = get_hwnd(window)
             if hwnd:
+                try:
+                    GWL_EXSTYLE = -20
+                    WS_EX_LAYERED = 0x00080000
+                    user32 = ctypes.windll.user32
+                    
+                    # 1. Layered Window
+                    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+                    
+                    # 2. Force Background Brush to NULL (Prevent White Flash/Paint)
+                    GCLP_HBRBACKGROUND = -10
+                    # 0 = NULL_BRUSH (Transparent), 4 = BLACK_BRUSH
+                    # Note: SetClassLongPtr might be SetClassLongW on 32-bit python, but we assume 64-bit usually
+                    try:
+                         if sys.maxsize > 2**32:
+                             user32.SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, 0)
+                         else:
+                             user32.SetClassLongW(hwnd, GCLP_HBRBACKGROUND, 0)
+                    except:
+                         pass # API might not exist on some older systems
+                         
+                except Exception as e:
+                    print(f"Layered Style/Brush Injection Failed: {e}")
+
                 win_engine.set_window_affinity(hwnd)
             else:
                 print("Could not find HWND for Stealth Mode.")
@@ -185,34 +257,78 @@ def start_app():
     api = ShadowLithAPI()
     
     # URL Logic
-    file_path = os.path.join(BASE_DIR, "ui", "index.html")
-    if os.getenv("SHADOWLITH_DEBUG"):
-        url = os.getenv("SHADOWLITH_DEBUG_URL", "http://localhost:5174")
-        print(f"Debug Mode: {url}")
-    elif os.path.exists(file_path):
-        url = file_path
-        print("Production Build Loaded.")
-    else:
-        url = "http://localhost:5174"
-        print("Dev Server (Localhost).")
+    # file_path = os.path.join(BASE_DIR, "ui", "index.html")
+    # if os.getenv("SHADOWLITH_DEBUG"):
+    #     url = os.getenv("SHADOWLITH_DEBUG_URL", "http://localhost:5174")
+    #     print(f"Debug Mode: {url}")
+    # elif os.path.exists(file_path):
+    #     url = file_path
+    #     print("Production Build Loaded.")
+    # else:
+    url = "http://localhost:5174"
+    print("Forced Dev Server (Localhost) for Live Updates.")
 
-    gui_engine = 'edgechromium' if sys.platform == 'win32' else 'qt'
+    # Use Qt engine on Windows (User Preferred for Transparency)
+    gui_engine = 'qt'
 
     window = webview.create_window(
         title="ShadowLith",
         url=url,
         js_api=api,
         width=w, height=h,
-        min_size=(800, 600),
+        min_size=(150, 100),
         frameless=True,
         on_top=True,
         transparent=True,
         easy_drag=False,
-        focus=False,
-        background_color='#000000'
+        focus=True,
+        background_color='#000000', # Force Black Background
+        hidden=False # DEBUG: Show window immediately
     )
     
     api.set_window(window)
+
+    def on_loaded():
+        # Inject CSS to force transparency
+        window.evaluate_js("""
+            document.body.style.backgroundColor = 'transparent';
+            document.documentElement.style.backgroundColor = 'transparent';
+        """)
+        
+        # INJECT NATIVE RESIZE WATCHER:
+        # Watches the React Layout and syncs the OS window size automatically
+        # Throttled with requestAnimationFrame for smoothness
+        window.evaluate_js("""
+            (function() {
+                let rAF_running = false;
+                const observer = new ResizeObserver(entries => {
+                    if (rAF_running) return;
+                    rAF_running = true;
+                    
+                    requestAnimationFrame(() => {
+                        for (let entry of entries) {
+                            const width = entry.contentRect.width;
+                            const height = document.body.scrollHeight;
+                            if (width > 50) {
+                                window.pywebview.api.sync_window_size(width, height);
+                            }
+                        }
+                        rAF_running = false;
+                    });
+                });
+                
+                const target = document.querySelector('#root > div');
+                if (target) {
+                    observer.observe(target);
+                    console.log("ShadowLith Smooth-ResizeWatcher Active");
+                }
+            })();
+        """)
+        
+        window.show()
+        print("ShadowLith UI Loaded & Visible (ResizeWatcher Active)")
+
+    window.events.loaded += on_loaded
 
     def toggle():
         global is_visible
@@ -224,39 +340,28 @@ def start_app():
                 window.show()
                 is_visible = True
 
-    h_key = keyboard.GlobalHotKeys({'<alt>+<space>': toggle})
-    h_key.start()
-    
-    # Ghost Mode Logic (Click-Through)
-    is_ghost = False
-    def toggle_ghost():
-        nonlocal is_ghost
-        is_ghost = not is_ghost
-        
-        if sys.platform == 'win32':
-             if win_engine:
-                 hwnd = get_hwnd(window)
-                 win_engine.set_click_through(hwnd, is_ghost)
-        else:
-             # Linux Logic
-             if hasattr(window, 'gui') and hasattr(window.gui, 'window'):
-                try:
-                    from PyQt6.QtCore import Qt
-                    flags = window.gui.window.windowFlags()
-                    if is_ghost:
-                        flags |= Qt.WindowType.WindowTransparentForInput
-                        flags |= Qt.WindowType.WindowStaysOnTopHint
-                    else:
-                        flags &= ~Qt.WindowType.WindowTransparentForInput
-                        flags |= Qt.WindowType.WindowStaysOnTopHint
-                    window.gui.window.setWindowFlags(flags)
-                    window.gui.window.show()
-                    print(f"Ghost Mode: {is_ghost}")
-                except Exception as e:
-                    print(f"Ghost Toggle Error: {e}")
+    def setup_hotkeys():
+        try:
+            h_key = keyboard.GlobalHotKeys({'<alt>+<space>': toggle})
+            h_key.start()
+            
+            # Use a lambda for ghost toggle to capture current state
+            ghost_state = [False] # Use a list for closure mutability
+            def toggle_ghost_wrapper():
+                ghost_state[0] = not ghost_state[0]
+                if sys.platform == 'win32' and win_engine:
+                    hwnd = get_hwnd(window)
+                    win_engine.set_click_through(hwnd, ghost_state[0])
 
-    g_key = keyboard.GlobalHotKeys({'<alt>+<shift>+<space>': toggle_ghost})
-    g_key.start()
+            g_key = keyboard.GlobalHotKeys({'<alt>+<shift>+<space>': toggle_ghost_wrapper})
+            g_key.start()
+            print("ShadowLith Hotkeys Active: Alt+Space (Toggle UI), Alt+Shift+Space (Ghost Mode)")
+        except Exception as e:
+            print(f"Hotkey Setup Failed: {e}")
+
+    # Start hotkeys in a separate thread after a short delay to prevent startup hang
+    import threading
+    threading.Timer(2.0, setup_hotkeys).start()
 
     webview.start(apply_stealth_hints, window, gui=gui_engine)
 

@@ -9,6 +9,14 @@
         width: 100%;
         margin: 0;
         padding: 0;
+        background-color: transparent !important;
+        cursor: default !important;
+    }
+
+    *,
+    *::before,
+    *::after {
+        cursor: default !important;
     }
 }
 
@@ -32,7 +40,7 @@
     }
 
     .thin-scrollbar::-webkit-scrollbar-thumb {
-        background: #d8d8d8;
+        background: #696969;
         /* zinc-700 */
         border-radius: 9999px;
     }

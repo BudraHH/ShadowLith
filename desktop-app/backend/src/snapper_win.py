@@ -61,7 +61,19 @@ class SnapperWin(QtWidgets.QWidget):
         screen_geometry = QtWidgets.QApplication.primaryScreen().virtualGeometry()
         self.setGeometry(screen_geometry)
         
-        self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        # Apply Stealth Mode to the Snapper UI (Hide from screen capture)
+        if sys.platform == "win32":
+            try:
+                # Force window handle creation if not yet visible
+                hwnd = int(self.winId())
+                # WDA_EXCLUDEFROMCAPTURE = 0x00000011
+                ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
+            except Exception as e:
+                print(f"Failed to set Snapper stealth: {e}")
+
+        # Use a standard arrow cursor instead of a crosshair to remain stealthy during screen sharing.
+        # Screen sharing tools often capture the system cursor even if the window is hidden.
+        self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         self.raise_()

@@ -1,9 +1,14 @@
 # Core Dependencies (Cross-Platform)
-google-generativeai
+google-genai
 screeninfo
 pynput
 Pillow
+python-dotenv
+pynput
+Pillow
+python-dotenv
 PyQt6
+PyQt6-WebEngine
 
 # Windows Specific Dependencies
 pywebview[edgechromium] ; sys_platform == 'win32'
