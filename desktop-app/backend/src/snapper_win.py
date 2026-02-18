@@ -1,54 +1,24 @@
+
 import sys
-import ctypes
 import os
-from PIL import ImageGrab
+import ctypes
 from PyQt6 import QtWidgets, QtCore, QtGui
 
-# Enable DPI Awareness logic for sharp screenshots on Windows
+# Enable high-DPI scaling for sharp screenshots
 try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1) # PROCESS_SYSTEM_DPI_AWARE
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()
-    except Exception:
-        pass
+    pass
 
 class SnapperWin(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
+        print("DEBUG: SnapperWin Initializing...")
         
-        # 1. Capture Virtual Desktop using Pillow
-        # all_screens=True captures all monitors as one large image
-        try:
-            # Grab all screens
-            self.screenshot = ImageGrab.grab(all_screens=True)
-            
-            # Ensure we have a valid image
-            if self.screenshot is None:
-                raise ValueError("ImageGrab returned None")
-                
-        except Exception as e:
-            # Handle error gracefully
-            print(f"Failed to grab screen: {e}")
-            sys.exit(1)
-
-        # Convert PIL Image (RGB) to QImage
-        # PIL uses RGB by default for grab
-        self.screenshot = self.screenshot.convert("RGBA")
-        data = self.screenshot.tobytes("raw", "RGBA")
+        # 1. Capture Virtual Desktop using Native Qt (more reliable than Pillow)
+        screen = QtWidgets.QApplication.primaryScreen()
+        self.original_pixmap = screen.grabWindow(0)
         
-        # Note regarding stride/bytes per line: 
-        # width * 4 bytes per pixel
-        qimage = QtGui.QImage(
-            data, 
-            self.screenshot.width, 
-            self.screenshot.height, 
-            QtGui.QImage.Format.Format_RGBA8888
-        )
-        
-        # Make a copy to decouple from PIL bytes
-        self.original_pixmap = QtGui.QPixmap.fromImage(qimage)
-
         # 2. Window Setup
         self.setWindowFlags(
             QtCore.Qt.WindowType.FramelessWindowHint | 
@@ -56,65 +26,71 @@ class SnapperWin(QtWidgets.QWidget):
             QtCore.Qt.WindowType.Tool 
         )
         
-        # Cover all monitors
-        # We rely on Qt's virtualGeometry to match Pillow's capture
-        screen_geometry = QtWidgets.QApplication.primaryScreen().virtualGeometry()
-        self.setGeometry(screen_geometry)
+        # Match the virtual desktop geometry
+        self.geom = screen.virtualGeometry()
+        self.setGeometry(self.geom)
         
-        # Apply Stealth Mode to the Snapper UI (Hide from screen capture)
+        # Stealth: Hide from screen capture itself
         if sys.platform == "win32":
             try:
-                # Force window handle creation if not yet visible
                 hwnd = int(self.winId())
-                # WDA_EXCLUDEFROMCAPTURE = 0x00000011
                 ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
-            except Exception as e:
-                print(f"Failed to set Snapper stealth: {e}")
+            except: pass
 
-        # Use a standard arrow cursor instead of a crosshair to remain stealthy during screen sharing.
-        # Screen sharing tools often capture the system cursor even if the window is hidden.
         self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
         self.setMouseTracking(True)
-        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
-        self.raise_()
-        self.activateWindow()
-
-        # 3. Drawing State
-        self.origin = QtCore.QPoint()
-        self.rubberBand = QtWidgets.QRubberBand(QtWidgets.QRubberBand.Shape.Rectangle, self)
         
+        # Drawing State
+        self.origin = QtCore.QPoint()
+        self.current_pos = QtCore.QPoint()
+        self.is_selecting = False
+
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        
-        # Draw the full screenshot
+        # 1. Draw the full screenshot as background
         painter.drawPixmap(self.rect(), self.original_pixmap)
         
-        # Draw dark overlay
-        painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 100))
-    
+        overlay_color = QtGui.QColor(0, 0, 0, 60) # Subtle 60 alpha
+        
+        if self.is_selecting:
+            selection_rect = QtCore.QRect(self.origin, self.current_pos).normalized()
+            
+            # 2. Create a "Spotlight" effect by punching a hole in the overlay
+            path = QtGui.QPainterPath()
+            path.addRect(QtCore.QRectF(self.rect())) # Outer boundary
+            path.addRect(QtCore.QRectF(selection_rect)) # Inner hole
+            
+            # Using OddEvenFill makes the intersection (the selection box) transparent
+            path.setFillRule(QtCore.Qt.FillRule.OddEvenFill)
+            painter.fillPath(path, overlay_color)
+            
+            # 3. Draw the subtle semi-transparent border (Tailwind emerald-700)
+            painter.setPen(QtGui.QPen(QtGui.QColor(4, 120, 87, 100), 1)) 
+            painter.drawRect(selection_rect)
+        else:
+            # Before selection starts, just dim the whole screen
+            painter.fillRect(self.rect(), overlay_color)
+
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.origin = event.pos()
-            self.rubberBand.setGeometry(QtCore.QRect(self.origin, QtCore.QSize()))
-            self.rubberBand.show()
+            self.current_pos = event.pos()
+            self.is_selecting = True
+            self.update()
 
     def mouseMoveEvent(self, event):
-        if not self.origin.isNull():
-            self.rubberBand.setGeometry(QtCore.QRect(self.origin, event.pos()).normalized())
+        if self.is_selecting:
+            self.current_pos = event.pos()
+            self.update()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            rect = self.rubberBand.geometry()
-            self.rubberBand.hide()
-            
-            # Save Logic
-            # Note: On Windows with DPI scaling, QWidget coordinates might be logical
-            # We use devicePixelRatio to map back to physical pixels of the screenshot
-            
-            dpr = self.devicePixelRatio()
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self.is_selecting:
+            rect = QtCore.QRect(self.origin, event.pos()).normalized()
+            self.is_selecting = False
             
             if rect.width() > 10 and rect.height() > 10:
+                # Correct for high DPI scaling
+                dpr = self.devicePixelRatio()
                 crop_rect = QtCore.QRect(
                     int(rect.x() * dpr),
                     int(rect.y() * dpr),
@@ -124,29 +100,28 @@ class SnapperWin(QtWidgets.QWidget):
                 
                 cropped = self.original_pixmap.copy(crop_rect)
                 
-                # Determine save path securely
+                # Save to specific path
                 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 dest = os.path.join(base_dir, "screenshots", "last_snip.png")
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 
                 cropped.save(dest, "PNG")
-                sys.stdout.write("SUCCESS\n")
+                print("SUCCESS")
             else:
-                sys.stdout.write("CANCEL\n")
-                
-            self.shutdown()
+                print("CANCEL")
+            
+            self.close()
+            QtWidgets.QApplication.quit()
 
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key.Key_Escape:
-            sys.stdout.write("CANCEL\n")
-            self.shutdown()
-            
-    def shutdown(self):
-        self.close()
-        QtWidgets.QApplication.quit()
+            print("CANCEL")
+            self.close()
+            QtWidgets.QApplication.quit()
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
-    snapper = SnapperWin()
-    snapper.show()
+    # Ensure window is visible immediately
+    window = SnapperWin()
+    window.showFullScreen()
     sys.exit(app.exec())

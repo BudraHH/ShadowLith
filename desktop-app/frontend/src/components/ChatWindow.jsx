@@ -3,7 +3,7 @@ import { X, Send, Bot, User, Trash2 } from "lucide-react";
 import Button from "./Button";
 import CodeBlock from "./CodeBlock";
 
-function ChatWindow({ messages, setMessages }) {
+function ChatWindow({ messages, setMessages, liveTranscript, isListening }) {
     const [input, setInput] = useState("");
     // messages state lifted to MainLayout
     const messagesEndRef = useRef(null);
@@ -15,6 +15,13 @@ function ChatWindow({ messages, setMessages }) {
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    // Ghost Drafter - Auto populate input from transcript
+    useEffect(() => {
+        if (isListening) {
+            setInput(liveTranscript);
+        }
+    }, [liveTranscript, isListening]);
 
     const [isTyping, setIsTyping] = useState(false);
 
@@ -30,7 +37,8 @@ function ChatWindow({ messages, setMessages }) {
         try {
             if (window.pywebview) {
                 // Call Python Backend
-                const rawResponse = await window.pywebview.api.chat(userMsg);
+                // If listening is active, we assume this is an Interview Question context
+                const rawResponse = await window.pywebview.api.chat(userMsg, isListening);
 
                 // Parse the structured JSON response
                 let parsed;
@@ -80,6 +88,29 @@ function ChatWindow({ messages, setMessages }) {
             setIsTyping(false);
         }
     };
+
+    const textAreaRef = useRef(null);
+
+    // Auto-grow textarea logic (Capped at 4 lines) + auto-scroll to bottom
+    useEffect(() => {
+        if (textAreaRef.current) {
+            const ta = textAreaRef.current;
+            // Reset to minimum to get true scrollHeight
+            ta.style.height = '38px';
+
+            if (input.trim().length === 0) {
+                // Empty input: stay at single-line height
+                ta.style.height = '38px';
+            } else {
+                // Grow to fit content, max out at ~4 lines (110px)
+                const scrollHeight = ta.scrollHeight;
+                ta.style.height = Math.min(scrollHeight, 110) + 'px';
+            }
+
+            // Always scroll the textarea to the bottom so latest text is visible
+            ta.scrollTop = ta.scrollHeight;
+        }
+    }, [input]);
 
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -146,22 +177,23 @@ function ChatWindow({ messages, setMessages }) {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
+            {/* Input Overlay with Auto-Growing Textarea */}
             <div className="p-3 border-t border-zinc-800 bg-zinc-900/50">
-                <div className="flex gap-2">
-                    <input
-                        type="text"
+                <div className="flex items-end gap-2">
+                    <textarea
+                        ref={textAreaRef}
+                        rows={1}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder="Type a message..."
-                        className="flex-1 bg-zinc-950/50 border border-zinc-800 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-700 placeholder:text-zinc-600"
+                        className="flex-1 bg-zinc-950/50 border border-zinc-800 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-700 placeholder:text-zinc-600 resize-none overflow-y-auto thin-scrollbar min-h-[38px] max-h-[110px]"
                         autoFocus
                     />
                     <Button
                         variant={input.trim() ? "primary" : "secondary"}
                         onClick={handleSend}
-                        className={!input.trim() ? "opacity-50 cursor-not-allowed" : ""}
+                        className={`mb-1 ${!input.trim() ? "opacity-50 cursor-not-allowed" : ""}`}
                         disabled={!input.trim()}
                     >
                         <Send size={14} />

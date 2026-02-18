@@ -35,102 +35,91 @@ class WindowsEngine:
             except Exception as e:
                 print(f"Error initializing Windows Engine: {e}")
 
-    def set_window_affinity(self, hwnd: int) -> bool:
-        """
-        Sets the window display affinity to WDA_EXCLUDEFROMCAPTURE (0x11).
-        This hides the window from screen capture.
-        """
+    def get_window_handle(self, title: str) -> int:
+        """Finds a window handle by its title."""
         if not self.is_windows:
-            return False
-            
+            return 0
         try:
-            # We use ctypes for SetWindowDisplayAffinity as it's not always exposed in pywin32
+            return win32gui.FindWindow(None, title)
+        except Exception as e:
+            print(f"Error finding window '{title}': {e}")
+            return 0
+
+    def apply_stealth_mode(self, hwnd: int) -> bool:
+        """Alias for set_window_affinity for better readability in main.py"""
+        return self.set_window_affinity(hwnd)
+
+    def set_window_affinity(self, hwnd: int) -> bool:
+        """ Hides the window from screen capture. """
+        if not self.is_windows: return False
+        try:
             user32 = ctypes.windll.user32
             result = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
             if result != 0:
-                print("Stealth Mode Enabled (WDA_EXCLUDEFROMCAPTURE applied).")
+                print("Stealth Mode Enabled (WDA applied).")
                 return True
-            else:
-                err = ctypes.get_last_error()
-                print(f"Failed to set Stealth Mode. Error Code: {err}")
-                return False
+            return False
         except Exception as e:
             print(f"Failed to set window affinity: {e}")
             return False
 
     def set_click_through(self, hwnd: int, enable: bool) -> bool:
-        """
-        Sets the window to be click-through (transparent to input) using pywin32.
-        """
-        if not self.is_windows:
-            return False
-        
+        """ Sets the window to be click-through (transparent to input). """
+        if not self.is_windows: return False
         try:
-            # Use pywin32 for window style manipulation
             current_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            
             if enable:
-                # Add Transparent and Layered flags
                 new_style = current_style | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED
-                print("GHOST MODE: ON (Click-Through)")
             else:
-                # Remove Transparent flag
                 new_style = current_style & ~win32con.WS_EX_TRANSPARENT
-                # Ensure Layered is kept (often needed for alpha transparency)
                 new_style |= win32con.WS_EX_LAYERED
-                print("GHOST MODE: OFF (Interactive)")
             
             win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, new_style)
-            
-            # Force repaint optional, but usually good practice
             win32gui.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
-            
             return True
         except Exception as e:
-            print(f"Failed to set click-through (pywin32): {e}")
+            print(f"Failed to set click-through: {e}")
             return False
 
-    async def run_ocr_async(self, image_path: str) -> str:
-        """
-        Runs OCR on the provided image file using Windows Media OCR.
-        """
+    async def _run_ocr_internal(self, img_data):
+        """Internal async OCR logic."""
+        from winsdk.windows.graphics.imaging import BitmapDecoder
+        from winsdk.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+        
+        stream = InMemoryRandomAccessStream()
+        writer = DataWriter(stream.get_output_stream_at(0))
+        writer.write_bytes(img_data)
+        await writer.store_async()
+        await writer.flush_async()
+
+        decoder = await BitmapDecoder.create_async(stream)
+        bitmap = await decoder.get_software_bitmap_async()
+        
+        result = await self.ocr_engine.recognize_async(bitmap)
+        return result.text if result else ""
+
+    def run_ocr(self, image_path: str) -> str:
+        """Runs OCR with pre-processing (Grayscale + High Contrast)."""
         if not self.is_windows or not self.ocr_engine:
             return "OCR Engine not available."
 
         try:
-            from winsdk.windows.storage import StorageFile, FileAccessMode
-            from winsdk.windows.graphics.imaging import BitmapDecoder
-            
-            # Ensure absolute path
-            abs_path = os.path.abspath(image_path)
-            
-            # Get file
-            file = await StorageFile.get_file_from_path_async(abs_path)
-            stream = await file.open_async(FileAccessMode.READ)
-            
-            # Decode
-            decoder = await BitmapDecoder.create_async(stream)
-            software_bitmap = await decoder.get_software_bitmap_async()
-            
-            # Recognize
-            result = await self.ocr_engine.recognize_async(software_bitmap)
-            
-            if not result or not result.lines:
-                return "No text detected."
-            
-            text = "\n".join([line.text for line in result.lines])
-            return text
-            
-        except Exception as e:
-            print(f"OCR Execution Error: {e}")
-            return f"Error: {e}"
+            from PIL import Image, ImageOps, ImageEnhance
+            import io
 
-    def run_ocr(self, image_path: str) -> str:
-        """
-        Synchronous wrapper for run_ocr_async.
-        """
-        try:
-            return asyncio.run(self.run_ocr_async(image_path))
+            # 1. Pre-process for character clarity
+            with Image.open(image_path) as img:
+                img = ImageOps.grayscale(img)
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(2.5) # Strong boost
+                
+                # Convert to bytes for WinSDK
+                img_byte_arr = io.BytesIO()
+                img.save(img_byte_arr, format='PNG')
+                img_data = img_byte_arr.getvalue()
+
+            # 2. Execute Async OCR in Sync Wrapper
+            return asyncio.run(self._run_ocr_internal(img_data))
         except Exception as e:
-            print(f"Sync OCR Error: {e}")
+            print(f"OCR Error: {e}")
             return ""

@@ -43,9 +43,64 @@ function MainLayout() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [captureCount, setCaptureCount] = useState(0);
 
+    // Audio Intelligence State
+    const [isListening, setIsListening] = useState(false);
+    const [liveTranscript, setLiveTranscript] = useState("");
+
     // History System
     const [history, setHistory] = useState([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
+
+    // ... (rest of code) ...
+
+    const handleListenToggle = async () => {
+        if (!window.pywebview) return;
+
+        if (isListening) {
+            // Stop Listening
+            await window.pywebview.api.stop_listening();
+            setIsListening(false);
+        } else {
+            // Start Listening
+            await window.pywebview.api.start_listening();
+            setIsListening(true);
+            setShowChat(true); // Open chat to show transcript
+        }
+    };
+
+    // Auto-stop listening if mode is changed away from Interview
+    useEffect(() => {
+        const handleAutoStop = async () => {
+            if (!window.pywebview) return;
+
+            if (mode === "Assessment" && isListening) {
+                await window.pywebview.api.stop_listening();
+                setIsListening(false);
+            }
+        };
+        handleAutoStop();
+    }, [mode, isListening]);
+
+    // Polling for Transcript
+    useEffect(() => {
+        let interval;
+        if (isListening && window.pywebview) {
+            interval = setInterval(async () => {
+                const text = await window.pywebview.api.get_live_transcript();
+                if (text && text.trim().length > 0) {
+                    setLiveTranscript(prev => {
+                        const newText = prev + " " + text;
+                        // Auto-scroll logic happens in ChatPanel
+                        return newText;
+                    });
+                }
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [isListening]);
+
+    // ... (rest of existing functions) ...
+
 
     // Chat Persistance
     const [chatMessages, setChatMessages] = useState([
@@ -257,9 +312,6 @@ function MainLayout() {
         return () => observer.disconnect();
     }, [showExplanation, showAnswer, showChat, showHistory, isHudMode, mode]); // Re-bind on layout changes
 
-    if (!isInitialized) {
-        return <ModeSelection onSelect={(m) => { setMode(m); setIsInitialized(true); }} />
-    }
 
     const noPanel = !showAnswer && !showExplanation && !showChat;
     const onlyOnePanel = (showAnswer && !showExplanation && !showChat) || (!showAnswer && showExplanation && !showChat) || (!showAnswer && !showExplanation && showChat);
@@ -267,203 +319,209 @@ function MainLayout() {
 
     return (
         <div id="main-layout-container" className="relative flex flex-col gap-2 h-screen bg-transparent overflow-hidden relative w-max">
+            {!isInitialized ? (
+                <ModeSelection onSelect={(m) => { setMode(m); setIsInitialized(true); }} />
+            ) : (
+                <>
+                    {/* --- TOP CONTROL BAR --- */}
+                    <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-50 relative pointer-events-auto">
+                        <div className="flex items-center gap-3 pl-2 pointer-events-none">
+                            <h1 className="text-sm font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-500">
+                                SHADOWLITH
+                            </h1>
+                            {captureCount > 0 && (
+                                <span className="bg-blue-900/50 text-blue-200 text-[10px] px-2 py-0.5 rounded-md border border-blue-500/20">
+                                    {captureCount} {captureCount > 1 ? 'Snippets' : 'Snippet'} {atleastTwoPanel && 'in Buffer'}
+                                </span>
+                            )}
 
+                            {/* History Navigation */}
+                            {mode !== 'Interview' && history.length > 1 && (
+                                <div className="flex items-center gap-2 bg-zinc-800/50 px-2 py-0.5 rounded-md border border-zinc-700/50 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
+                                    <button
+                                        onClick={() => navigateHistory(-1)}
+                                        disabled={historyIndex <= 0}
+                                        className={`p-0.5 transition-colors ${historyIndex <= 0 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-400 hover:text-zinc-100'}`}
+                                    >
+                                        <ChevronLeft size={12} />
+                                    </button>
+                                    <span className="text-[10px] font-mono text-zinc-500 select-none">
+                                        v{historyIndex + 1}/{history.length}
+                                    </span>
+                                    <button
+                                        onClick={() => navigateHistory(1)}
+                                        disabled={historyIndex >= history.length - 1}
+                                        className={`p-0.5 transition-colors ${historyIndex >= history.length - 1 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-400 hover:text-zinc-100'}`}
+                                    >
+                                        <ChevronRight size={12} />
+                                    </button>
+                                </div>
+                            )}
+                        </div>
 
-            {/* --- TOP CONTROL BAR --- */}
-            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-50 relative pointer-events-auto">
-                <div className="flex items-center gap-3 pl-2 pointer-events-none">
-                    <h1 className="text-sm font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-500">
-                        SHADOWLITH
-                    </h1>
-                    {captureCount > 0 && (
-                        <span className="bg-blue-900/50 text-blue-200 text-[10px] px-2 py-0.5 rounded-md border border-blue-500/20">
-                            {captureCount} {captureCount > 1 ? 'Snippets' : 'Snippet'} {atleastTwoPanel && 'in Buffer'}
-                        </span>
-                    )}
+                        <div className="flex flex-row items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
+                            {/* Mode Selector */}
+                            <div className="flex items-center bg-zinc-950/50 border border-zinc-800 rounded-md p-0.5">
+                                {["Assessment", "Interview"].map((m) => (
+                                    <button
+                                        key={m}
+                                        onClick={() => setMode(m)}
+                                        className={`px-2 py-1 text-[10px] rounded-[4px] transition-all duration-200 ${mode === m
+                                            ? "bg-zinc-800 text-zinc-100 shadow-sm"
+                                            : "text-zinc-500 hover:text-zinc-300"
+                                            }`}
+                                    >
+                                        {m}
+                                    </button>
+                                ))}
+                            </div>
 
-                    {/* History Navigation */}
-                    {mode !== 'Interview' && history.length > 1 && (
-                        <div className="flex items-center gap-2 bg-zinc-800/50 px-2 py-0.5 rounded-md border border-zinc-700/50 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
-                            <button
-                                onClick={() => navigateHistory(-1)}
-                                disabled={historyIndex <= 0}
-                                className={`p-0.5 transition-colors ${historyIndex <= 0 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-400 hover:text-zinc-100'}`}
-                            >
-                                <ChevronLeft size={12} />
-                            </button>
-                            <span className="text-[10px] font-mono text-zinc-500 select-none">
-                                v{historyIndex + 1}/{history.length}
-                            </span>
-                            <button
-                                onClick={() => navigateHistory(1)}
-                                disabled={historyIndex >= history.length - 1}
-                                className={`p-0.5 transition-colors ${historyIndex >= history.length - 1 ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-400 hover:text-zinc-100'}`}
-                            >
-                                <ChevronRight size={12} />
-                            </button>
+                            {/* Custom Select (ShadeCN Style) */}
+                            <Select
+                                value={language}
+                                onChange={setLanguage}
+                                options={["Python", "Java", "C++", "JavaScript", "Go", "Rust", "SQL"]}
+                                placeholder="Select"
+                            />
+
+                            {showSystemButtons && (
+                                <div className="flex items-center gap-0.5">
+                                    {(!noPanel || !onlyOnePanel) && <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-red-400 gap-1.5">Abort</Button>}
+                                    <Button variant="ghost" onClick={handleHide} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">Hide</Button>
+                                    <Button variant="ghost" onClick={async () => window.pywebview && window.pywebview.api.terminate_app()} className="flex items-center text-zinc-500 hover:text-red-500 gap-1.5 px-2">Quit</Button>
+                                </div>
+                            )}
+
+                            <div onClick={() => setShowSystemButtons(!showSystemButtons)} className="group flex items-center justify-center p-2 rounded-md bg-transparent hover:bg-zinc-800/50 cursor-pointer pointer-events-auto transition-colors duration-200">
+                                <ChevronLeft size={14} className={`transition-all duration-300 transform ${showSystemButtons ? "text-zinc-500 rotate-180" : "text-zinc-400 rotate-0"} group-hover:text-white group-hover:scale-110`} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* CONTROL BAR */}
+                    <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
+                        <div className="flex flex-row items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
+                            <Button variant="ghost" onClick={handleCapture} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">
+                                <Camera size={14} className="text-zinc-500" /> Capture
+                            </Button>
+                            {mode === 'Interview' && (
+                                <Button onClick={handleListenToggle} variant="ghost" className={`flex items-center gap-1.5 px-2 transition-all ${isListening ? 'text-red-400 animate-pulse bg-red-500/10' : 'text-zinc-400 hover:text-blue-400'}`}>
+                                    <Mic size={14} className={isListening ? "text-red-500" : "text-zinc-500"} /> {isListening ? "Listening..." : "Listen"}
+                                </Button>
+                            )}
+                            <Button disabled variant="ghost" className="flex items-center text-zinc-400 hover:text-purple-400 gap-1.5 px-2">
+                                <MonitorPlay size={14} className="text-zinc-500" /> Analyse {atleastTwoPanel && 'Panel'}
+                            </Button>
+                            <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-yellow-400 gap-1.5 px-2">
+                                <Trash2 size={14} className="text-zinc-500" /> Clear
+                            </Button>
+                            {mode !== 'Interview' && (
+                                <Button variant="ghost" onClick={() => setShowHistory(!showHistory)} className={`flex items-center gap-1.5 px-2 transition-all ${showHistory ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-400 hover:text-blue-400'}`}>
+                                    <History size={14} className={showHistory ? "text-blue-400" : "text-zinc-500"} /> History
+                                </Button>
+                            )}
+                            <Button variant="ghost" onClick={handleProcess} disabled={isProcessing || captureCount === 0} className={`flex items-center gap-1.5 px-2 ${isProcessing ? 'text-zinc-600' : 'text-zinc-400 hover:text-emerald-400'}`}>
+                                {isProcessing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} className="text-zinc-500" />}
+                                {isProcessing ? 'Thinking...' : 'Process'}
+                            </Button>
+                        </div>
+                    </div>
+
+                    {/* --- HISTORY TIMELINE --- */}
+                    {mode !== 'Interview' && showHistory && history.length > 0 && (
+                        <div className="flex flex-row justify-start items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2 border-r border-zinc-800 mr-2">Version History</span>
+                            <div className="flex flex-row gap-1.5 overflow-x-auto no-scrollbar items-center">
+                                {(() => {
+                                    let pCounter = 0;
+                                    let lastSummary = null;
+                                    let vCounter = 0;
+
+                                    return history.map((item, idx) => {
+                                        const summary = item.data?.summary || item.explanationData?.summary || "Analysis";
+                                        let isNewGroup = false;
+
+                                        if (summary !== lastSummary) {
+                                            pCounter++;
+                                            vCounter = 1;
+                                            lastSummary = summary;
+                                            isNewGroup = true;
+                                        } else {
+                                            vCounter++;
+                                        }
+
+                                        const label = `P${pCounter}`;
+                                        const version = `v${vCounter}`;
+
+                                        return (
+                                            <React.Fragment key={idx}>
+                                                {isNewGroup && idx > 0 && <div className="w-px h-6 bg-zinc-800 mx-1 shrink-0"></div>}
+                                                <button
+                                                    onClick={() => {
+                                                        setHistoryIndex(idx);
+                                                        setData(item.data);
+                                                        setExplanationData(item.explanationData);
+                                                    }}
+                                                    className={`flex flex-col items-start justify-center px-3 py-1 rounded-md text-xs font-mono transition-all shrink-0 border h-full min-w-[100px] ${historyIndex === idx
+                                                        ? 'bg-blue-600/20 border-blue-500/50 text-blue-100 shadow-[0_0_10px_rgba(59_130_246_0.1)]'
+                                                        : 'bg-zinc-800/30 border-zinc-700/30 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center justify-between w-full gap-2">
+                                                        <span className={`text-[10px] font-bold ${historyIndex === idx ? "text-blue-400" : "text-zinc-600"}`}>
+                                                            {label} <span className="opacity-50 font-normal">. {version}</span>
+                                                        </span>
+                                                        {isNewGroup && <span className="w-1.5 h-1.5 rounded-full bg-blue-500/40"></span>}
+                                                    </div>
+                                                    <span className="max-w-[120px] truncate opacity-70 text-[10px] leading-tight">
+                                                        {summary}
+                                                    </span>
+                                                </button>
+                                            </React.Fragment>
+                                        );
+                                    });
+                                })()}
+                            </div>
                         </div>
                     )}
-                </div>
 
-                <div className="flex flex-row items-center gap-2" onMouseDown={(e) => e.stopPropagation()}>
-                    {/* Mode Selector */}
-                    <div className="flex items-center bg-zinc-950/50 border border-zinc-800 rounded-md p-0.5">
-                        {["Assessment", "Interview"].map((m) => (
-                            <button
-                                key={m}
-                                onClick={() => setMode(m)}
-                                className={`px-2 py-1 text-[10px] rounded-[4px] transition-all duration-200 ${mode === m
-                                    ? "bg-zinc-800 text-zinc-100 shadow-sm"
-                                    : "text-zinc-500 hover:text-zinc-300"
-                                    }`}
-                            >
-                                {m}
-                            </button>
-                        ))}
+                    {/* --- MAIN CONTENT AREA --- */}
+                    <div className={`flex flex-row flex-1 gap-2 text-sm min-h-0 opacity-98 transition-opacity duration-300 ${isProcessing ? 'opacity-50 pointer-events-none' : ''} z-0 relative`}>
+                        <ExplanationPanel
+                            showExplanation={showExplanation}
+                            setShowExplanation={setShowExplanation}
+                            showAnswer={showAnswer}
+                            showChat={showChat}
+                            explanationData={explanationData}
+                            renderBlocks={renderBlocks}
+                            renderHeaderBadges={renderHeaderBadges}
+                            isProcessing={isProcessing}
+                        />
+
+                        <SolutionPanel
+                            showAnswer={showAnswer}
+                            setShowAnswer={setShowAnswer}
+                            showExplanation={showExplanation}
+                            showChat={showChat}
+                            data={data}
+                            renderBlocks={renderBlocks}
+                            renderHeaderBadges={renderHeaderBadges}
+                            isProcessing={isProcessing}
+                        />
+
+                        <ChatPanel
+                            showChat={showChat}
+                            setShowChat={setShowChat}
+                            showExplanation={showExplanation}
+                            showAnswer={showAnswer}
+                            messages={chatMessages}
+                            setMessages={setChatMessages}
+                            liveTranscript={liveTranscript}
+                            isListening={isListening}
+                        />
                     </div>
-
-                    {/* Custom Select (ShadeCN Style) */}
-                    <Select
-                        value={language}
-                        onChange={setLanguage}
-                        options={["Python", "Java", "C++", "JavaScript", "Go", "Rust", "SQL"]}
-                        placeholder="Select"
-                    />
-
-
-
-                    {showSystemButtons && (
-                        <div className="flex items-center gap-0.5">
-                            {(!noPanel || !onlyOnePanel) && <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-red-400 gap-1.5">Abort</Button>}
-                            <Button variant="ghost" onClick={handleHide} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">Hide</Button>
-                            <Button variant="ghost" onClick={async () => window.pywebview && window.pywebview.api.terminate_app()} className="flex items-center text-zinc-500 hover:text-red-500 gap-1.5 px-2">Quit</Button>
-                        </div>
-                    )}
-
-                    <div onClick={() => setShowSystemButtons(!showSystemButtons)} className="group flex items-center justify-center p-2 rounded-md bg-transparent hover:bg-zinc-800/50 cursor-pointer pointer-events-auto transition-colors duration-200">
-                        <ChevronLeft size={14} className={`transition-all duration-300 transform ${showSystemButtons ? "text-zinc-500 rotate-180" : "text-zinc-400 rotate-0"} group-hover:text-white group-hover:scale-110`} />
-                    </div>
-                </div>
-            </div>
-
-            {/* CONTROL BAR */}
-            <div className="pywebview-drag-region flex flex-row justify-between items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
-                <div className="flex flex-row items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
-                    <Button variant="ghost" onClick={handleCapture} className="flex items-center text-zinc-400 hover:text-zinc-100 gap-1.5 px-2">
-                        <Camera size={14} className="text-zinc-500" /> Capture
-                    </Button>
-                    <Button disabled variant="ghost" className="flex items-center text-zinc-400 hover:text-blue-400 gap-1.5 px-2">
-                        <Mic size={14} className="text-zinc-500" /> Listen
-                    </Button>
-                    <Button disabled variant="ghost" className="flex items-center text-zinc-400 hover:text-purple-400 gap-1.5 px-2">
-                        <MonitorPlay size={14} className="text-zinc-500" /> Analyse {atleastTwoPanel && 'Panel'}
-                    </Button>
-                    <Button variant="ghost" onClick={handleClear} className="flex items-center text-zinc-400 hover:text-yellow-400 gap-1.5 px-2">
-                        <Trash2 size={14} className="text-zinc-500" /> Clear
-                    </Button>
-                    {mode !== 'Interview' && (
-                        <Button variant="ghost" onClick={() => setShowHistory(!showHistory)} className={`flex items-center gap-1.5 px-2 transition-all ${showHistory ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-400 hover:text-blue-400'}`}>
-                            <History size={14} className={showHistory ? "text-blue-400" : "text-zinc-500"} /> History
-                        </Button>
-                    )}
-                    <Button variant="ghost" onClick={handleProcess} disabled={isProcessing || captureCount === 0} className={`flex items-center gap-1.5 px-2 ${isProcessing ? 'text-zinc-600' : 'text-zinc-400 hover:text-emerald-400'}`}>
-                        {isProcessing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} className="text-zinc-500" />}
-                        {isProcessing ? 'Thinking...' : 'Process'}
-                    </Button>
-                </div>
-            </div>
-
-            {/* --- HISTORY TIMELINE --- */}
-            {mode !== 'Interview' && showHistory && history.length > 0 && (
-                <div className="flex flex-row justify-start items-center p-2 w-full bg-[#030303] border border-zinc-800 rounded-md select-none hover:border-zinc-700/50 transition-colors shrink-0 cursor-default z-40 relative pointer-events-auto">
-                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2 border-r border-zinc-800 mr-2">Version History</span>
-                    <div className="flex flex-row gap-1.5 overflow-x-auto no-scrollbar items-center">
-                        {(() => {
-                            let pCounter = 0;
-                            let lastSummary = null;
-                            let vCounter = 0;
-
-                            return history.map((item, idx) => {
-                                const summary = item.data?.summary || item.explanationData?.summary || "Analysis";
-                                let isNewGroup = false;
-
-                                if (summary !== lastSummary) {
-                                    pCounter++;
-                                    vCounter = 1;
-                                    lastSummary = summary;
-                                    isNewGroup = true;
-                                } else {
-                                    vCounter++;
-                                }
-
-                                const label = `P${pCounter}`;
-                                const version = `v${vCounter}`;
-
-                                return (
-                                    <React.Fragment key={idx}>
-                                        {isNewGroup && idx > 0 && <div className="w-px h-6 bg-zinc-800 mx-1 shrink-0"></div>}
-                                        <button
-                                            onClick={() => {
-                                                setHistoryIndex(idx);
-                                                setData(item.data);
-                                                setExplanationData(item.explanationData);
-                                            }}
-                                            className={`flex flex-col items-start justify-center px-3 py-1 rounded-md text-xs font-mono transition-all shrink-0 border h-full min-w-[100px] ${historyIndex === idx
-                                                ? 'bg-blue-600/20 border-blue-500/50 text-blue-100 shadow-[0_0_10px_rgba(59,130,246,0.1)]'
-                                                : 'bg-zinc-800/30 border-zinc-700/30 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
-                                                }`}
-                                        >
-                                            <div className="flex items-center justify-between w-full gap-2">
-                                                <span className={`text-[10px] font-bold ${historyIndex === idx ? "text-blue-400" : "text-zinc-600"}`}>
-                                                    {label} <span className="opacity-50 font-normal">. {version}</span>
-                                                </span>
-                                                {isNewGroup && <span className="w-1.5 h-1.5 rounded-full bg-blue-500/40"></span>}
-                                            </div>
-                                            <span className="max-w-[120px] truncate opacity-70 text-[10px] leading-tight">
-                                                {summary}
-                                            </span>
-                                        </button>
-                                    </React.Fragment>
-                                );
-                            });
-                        })()}
-                    </div>
-                </div>
+                </>
             )}
-
-            {/* --- MAIN CONTENT AREA --- */}
-            <div className={`flex flex-row flex-1 gap-2 text-sm min-h-0 opacity-98 transition-opacity duration-300 ${isProcessing ? 'opacity-50 pointer-events-none' : ''} z-0 relative`}>
-                <ExplanationPanel
-                    showExplanation={showExplanation}
-                    setShowExplanation={setShowExplanation}
-                    showAnswer={showAnswer}
-                    showChat={showChat}
-                    explanationData={explanationData}
-                    renderBlocks={renderBlocks}
-                    renderHeaderBadges={renderHeaderBadges}
-                    isProcessing={isProcessing}
-                />
-
-                <SolutionPanel
-                    showAnswer={showAnswer}
-                    setShowAnswer={setShowAnswer}
-                    showExplanation={showExplanation}
-                    showChat={showChat}
-                    data={data}
-                    renderBlocks={renderBlocks}
-                    renderHeaderBadges={renderHeaderBadges}
-                    isProcessing={isProcessing}
-                />
-
-                <ChatPanel
-                    showChat={showChat}
-                    setShowChat={setShowChat}
-                    showExplanation={showExplanation}
-                    showAnswer={showAnswer}
-                    messages={chatMessages}
-                    setMessages={setChatMessages}
-                />
-            </div>
         </div>
     );
 }

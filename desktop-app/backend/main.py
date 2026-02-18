@@ -1,336 +1,318 @@
-import sys
+
 import os
-
-# Set WebView2 Background to Transparent (0) BEFORE importing webview
-if sys.platform == "win32":
-    # Fallback to Black (FF000000 AARRGGBB) to prevent White Flash if transparency fails
-    os.environ['WEBVIEW2_DEFAULT_BACKGROUND_COLOR'] = 'FF000000'
-
-import webview
-import subprocess
+import sys
+import json
 import time
-from pynput import keyboard
-from screeninfo import get_monitors
+import shutil
+import threading
+import webview
+import ctypes
+import base64
+import io
 from src.engine.gemini import ShadowLithEngine
 
-# Platform specific imports & Engine Setup
-if sys.platform == "win32":
-    import ctypes
-    from windows_engine import WindowsEngine
-    try:
-        # Initialize Windows Engine (OCR & Stealth)
-        win_engine = WindowsEngine()
-        print("Windows Engine Initialized.")
-    except Exception as e:
-        print(f"Windows Engine Init Failed: {e}")
-        win_engine = None
-else:
-    # Linux/Mac Imports
-    import shutil
-    from src.engine.ocr import TextBuffer
+# Lazy Initialized Engines
+win_engine = None
 
-# Absolute Pathing
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCREENSHOT_DIR = os.path.join(BASE_DIR, "screenshots")
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-SNIP_PATH = os.path.join(SCREENSHOT_DIR, "last_snip.png")
-
-# Global visibility state
-is_visible = True
+# Fix for OpenMP conflict (Prevents silent crash during Whisper load)
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "1"
 
 class ShadowLithAPI:
     def __init__(self):
-        self.engine = ShadowLithEngine()
+        self.engine = None
+        self.audio_engine = None
         self._window = None
-        
-        # OCR Backend Initialization
-        if sys.platform == "win32":
-            self.buffer_text = []
-        else:
-            tess_path = shutil.which("tesseract") or "/usr/bin/tesseract"
-            self.buffer = TextBuffer(tess_path)
+        self._win_engine = None
+        self.is_ready = False
+        self.ghost_enabled = False
+        self.snip_buffer = [] # State management for snippets
+        self._services_initialized = False
 
-    def set_window(self, window):
+    def init_background_services(self, window):
+        """Heavy lifting happens here after window is shown to prevent startup hangs."""
+        if self._services_initialized: return
+        self._services_initialized = True
+        
         self._window = window
-
-    def capture(self):
+        print("DEBUG: Fast-Boot: Initializing Background Services...")
+        
         try:
-            if self._window: self._window.hide()
+            # 1. Load Gemini Engine
+            print("DEBUG: Loading Gemini Engine...")
+            self.engine = ShadowLithEngine()
             
-            # Clean up old snip
-            if os.path.exists(SNIP_PATH):
-                os.remove(SNIP_PATH)
-
-            # Select Snapper Script based on OS
-            if sys.platform == "win32":
-                snapper_script = os.path.join(BASE_DIR, "src", "snapper_win.py")
-            else:
-                snapper_script = os.path.join(BASE_DIR, "src", "snapper.py")
+            # 2. Load WinEngine (Stealth Logic)
+            print("DEBUG: Loading WinEngine...")
+            from windows_engine import WindowsEngine
+            self._win_engine = WindowsEngine()
             
-            # Use appropriate python runner
-            venv_python = os.path.join(BASE_DIR, "venv", "bin", "python")
-            if sys.platform == "win32":
-                venv_python = os.path.join(BASE_DIR, "venv", "Scripts", "python.exe")
+            # 3. Start Stealth and Hotkeys in background
+            print("DEBUG: Starting Stealth & Hotkey Threads...")
+            self._start_stealth_thread()
+            self._start_hotkey_thread()
             
-            runner = venv_python if os.path.exists(venv_python) else sys.executable
-
-            print(f"Launching Snapper via: {runner} -> {snapper_script}")
-            
-            try:
-                subprocess.run([runner, snapper_script], check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                print(f"Snapper Error: {e.stderr}")
-                if self._window: self._window.show()
-                return {"status": "error", "message": "Snip selection cancelled or failed."}
-
-            # Brief wait for IO
-            time.sleep(0.1)
-
-            if os.path.exists(SNIP_PATH):
-                if sys.platform == "win32":
-                    # Windows Native OCR (WinOCR)
-                    if win_engine:
-                        text = win_engine.run_ocr(SNIP_PATH)
-                        if text:
-                            print(f"DEBUG: WinOCR Success | Length: {len(text)} chars | Text Preview: {text[:50]}...")
-                            self.buffer_text.append(text)
-                            if self._window: self._window.show()
-                            return {"status": "success", "count": len(self.buffer_text)}
-                        else:
-                            print("DEBUG: WinOCR returned empty string.")
-                    else:
-                        print("DEBUG: WinOCR Engine not initialized.")
-                else:
-                    # Linux Tesseract
-                    success = self.buffer.add(SNIP_PATH)
-                    if self._window: self._window.show()
-                    if success:
-                        return {"status": "success", "count": len(self.buffer.parts)}
-            
-            if self._window: self._window.show()
-            return {"status": "error", "message": "No text detected."}
-        
+            self.is_ready = True
+            print("ShadowLith System Fully Operational.")
         except Exception as e:
-            print(f"DEBUG: Capture Exception: {e}")
-            if self._window: self._window.show()
-            return {"status": "error", "message": str(e)}
+            print(f"ERROR during Initialization: {e}")
+            import traceback
+            traceback.print_exc()
 
-    def get_answer(self, mode="Assessment", language="Python"):
-        print(f"DEBUG: Processing Request | Mode: {mode} | Language: {language} | Buffer Count: {len(self.buffer_text)}")
-        if sys.platform == "win32":
-            text = "\n\n".join(self.buffer_text)
-            if not text.strip():
-                 print("DEBUG: Buffer is empty, aborting request.")
-                 return '{"type": "error", "explanation": "Buffer empty"}'
-        else:
-            text = self.buffer.get_full_text()
-            if not text:
-                 return '{"type": "error", "explanation": "Buffer empty"}'
-                 
-        # Prepend mode context if provided
-        full_query = f"MODE: {mode}\nLANGUAGE: {language}\n\nCONTENT:\n{text}"
-        
-        print("DEBUG: Sending Query to Gemini...")
-        response = self.engine.ask(full_query)
-        
-        print("-" * 40)
-        print("DEBUG: RAW GEMINI RESPONSE:")
-        print(response)
-        print("-" * 40)
-        
-        return response
+    def _start_stealth_thread(self):
+        def stealth_loop():
+            time.sleep(1) # Wait for window to register in OS
+            print("Stealth Mode Enabled (WDA applied).")
+            hwnd = self._win_engine.get_window_handle("ShadowLith")
+            if hwnd:
+                self._win_engine.apply_stealth_mode(hwnd)
+        threading.Thread(target=stealth_loop, daemon=True).start()
 
-    
-    def chat(self, message):
-        """Send a message to the persistent chat session with condensed instruction."""
-        print(f"DEBUG: Chat Message Received: {message}")
+    def _start_hotkey_thread(self):
+        def hotkey_loop():
+            try:
+                from pynput import keyboard
+                time.sleep(1.5) # Prevent conflict with startup handles
+                listener = keyboard.GlobalHotKeys({
+                    '<alt>+<space>': self.toggle_ui,
+                    '<alt>+<shift>+<space>': self.toggle_ghost_mode
+                })
+                listener.start()
+                print("Hotkeys Active: Alt+Space (Toggle), Alt+Shift+Space (Ghost)")
+                while True: time.sleep(10) # Keep thread alive
+            except Exception as e:
+                print(f"Hotkey Error: {e}")
+        threading.Thread(target=hotkey_loop, daemon=True).start()
+
+    # --- UI CONTROLS ---
+    def toggle_ui(self):
+        if self._window:
+            # Simple toggle logic
+            if self._window.minimized:
+                self._window.restore()
+            else:
+                self._window.minimize()
+
+    def toggle_ghost_mode(self):
+        """Toggle click-through mode for the OS window."""
+        if not self.is_ready or not self._win_engine: return
+        
+        self.ghost_enabled = not self.ghost_enabled
+        print(f"DEBUG: Ghost Mode Toggle: {self.ghost_enabled}")
+        
+        # We need the HWND
+        try:
+            hwnd = self._win_engine.get_window_handle("ShadowLith")
+            if hwnd:
+                self._win_engine.set_click_through(hwnd, self.ghost_enabled)
+        except Exception as e:
+            print(f"Ghost Mode Toggle Failed: {e}")
+
+    def sync_window_size(self, width, height):
+        if self._window:
+            clamped_width = max(150, min(1400, int(width)))
+            self._window.resize(clamped_width, 850)
+        return "Synced"
+
+    def chat(self, message, is_interview_mode=False):
+        if not self.engine: 
+            return json.dumps({"blocks": [{"type": "text", "content": "ShadowLith Engine still starting up... Please wait a moment."}]})
+        
+        print(f"DEBUG: Chat Message Received: {message} | Interview Mode: {is_interview_mode}")
+        
         if not message.strip():
-            return '{"type": "error", "explanation": "Empty message"}'
+            return json.dumps({"blocks": [{"type": "text", "content": "Empty message."}]})
             
-        # Wrap user message to enforce JSON behavior even in chat
-        chat_prompt = (
-            f"USER_CHAT: {message}\n"
-            "INSTRUCTION: Reply nicely and concisely. You are chatting with the user about the previous problem. "
-            "Output a single valid JSON object with a 'blocks' array. "
-            "Use 'text' blocks for explanation and 'code' blocks for any code examples requested."
-        )
+        if is_interview_mode:
+            # Specialized prompt for answering an interviewer
+            chat_prompt = (
+                f"INTERVIEWER_QUESTION: {message}\n"
+                "INSTRUCTION: The user is currently in a technical interview and just heard this question. "
+                "Provide a direct, professional script they can say to answer it immediately. "
+                "Keep it concise, natural, and confident. Avoid 'Sure, here is the answer'. Jump straight to the explanation. "
+                "If code is needed, provide it in a 'code' block. Use 'text' blocks for the script. "
+                "Output valid JSON."
+            )
+        else:
+            # Standard chat interaction
+            chat_prompt = (
+                f"USER_CHAT: {message}\n"
+                "INSTRUCTION: Reply nicely and concisely. You are chatting with the user about the previous problem. "
+                "Output a single valid JSON object with a 'blocks' array. "
+                "Use 'text' blocks for explanation and 'code' blocks for any code examples requested."
+            )
         
         print("DEBUG: Sending Chat Query to Gemini...")
         response = self.engine.ask(chat_prompt)
-        print(f"DEBUG: Chat Response: {response}")
+        print(f"DEBUG: Chat Response: {response[:50]}...")
         return response
 
+    def start_listening(self):
+        self._ensure_audio_engine()
+        if self.audio_engine:
+            self.audio_engine.start_listening()
+        return "Listening Started"
+
+    def stop_listening(self):
+        if self.audio_engine:
+            self.audio_engine.stop_listening()
+        return "Listening Stopped"
+
+    def get_live_transcript(self):
+        if not self.audio_engine: return ""
+        return self.audio_engine.get_transcript(clear_after=True)
+
+    def capture(self):
+        """Captures a region of the screen using the Snip Tool (Interactive)."""
+        if not self._window: return ""
+        print("DEBUG: Snipping Tool Requested.")
+        
+        try:
+            # 1. Hide the window for stealth
+            self._window.hide()
+            time.sleep(0.3) # Wait for fade-out to ensure it's not in the snip
+            
+            # 2. Launch snapper_win.py as a subprocess
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            snapper_path = os.path.join(current_dir, "src", "snapper_win.py")
+            
+            import subprocess
+            # Use sys.executable to use the current virtual environment
+            result = subprocess.run([sys.executable, snapper_path], capture_output=True, text=True)
+            
+            # 3. Restore window immediately
+            self._window.show()
+            
+            # 4. Process result
+            if "SUCCESS" in result.stdout:
+                img_path = os.path.join(current_dir, "screenshots", "last_snip.png")
+                if os.path.exists(img_path):
+                    with open(img_path, "rb") as f:
+                        data = f.read()
+                        img_base64 = base64.b64encode(data).decode('utf-8')
+                        self.snip_buffer.append(img_base64)
+                        
+                        # LOG OCR IMMEDIATELY FOR VERIFICATION
+                        if self._win_engine:
+                            print("DEBUG: Running Local Windows OCR for verification...")
+                            ocr_text = self._win_engine.run_ocr(img_path)
+                            print("--- START OCR VERIFICATION ---")
+                            print(ocr_text if ocr_text else "[No text detected by local OCR]")
+                            print("--- END OCR VERIFICATION ---")
+
+                        print(f"DEBUG: Capture Success. Buffer Size: {len(self.snip_buffer)}")
+                        return {"status": "success", "count": len(self.snip_buffer)}
+            else:
+                print(f"DEBUG: Snip Cancelled or Failed. Stdout: {result.stdout}")
+            
+            return {"status": "failed", "count": len(self.snip_buffer)}
+            
+        except Exception as e:
+            print(f"Snip Tool Execution Failed: {e}")
+            if self._window: self._window.show()
+            return ""
+            
+        except Exception as e:
+            print(f"Capture Failed: {e}")
+            if self._window: self._window.show()
+            return ""
+
+    def _ensure_audio_engine(self):
+        if not self.audio_engine:
+            print("Importing & Initializing Audio Engine (Lazy Load)...")
+            try:
+                from src.engine.audio import AudioEngine
+                self.audio_engine = AudioEngine()
+            except Exception as e:
+                print(f"Failed to initialize Audio Engine: {e}")
+
+    def get_answer(self, mode, language):
+        """Main entry point for processing the current snippet buffer."""
+        if not self.engine: return "{}"
+        if not self.snip_buffer:
+            return json.dumps({"blocks": [{"type": "warning", "content": "No screenshots in buffer. Capture something first."}]})
+
+        print(f"DEBUG: Processing {len(self.snip_buffer)} snippets in {mode} mode ({language})...")
+        
+        # Take the most recent snip for single-image analysis
+        latest_snip = self.snip_buffer[-1]
+        
+        prompt = (
+            f"MODE: {mode}\nLANGUAGE: {language}\n"
+            "INSTRUCTION: Solve the technical problem shown in the screenshot. "
+            "Follow the block schema strictly. Provide summary, complexity, problem analysis, strategy, "
+            "steps, and the code solution."
+        )
+
+        return self.engine.ask_with_image(prompt, latest_snip)
+
     def revoke_snip(self):
-        if sys.platform == "win32":
-            self.buffer_text = []
-        else:
-            self.buffer.clear()
-        self.engine.reset()
+        """Clears the current snippet buffer."""
+        self.snip_buffer = []
+        print("DEBUG: Snip Buffer Cleared.")
         return "Cleared"
 
     def hide_ui(self):
-        global is_visible
         if self._window:
-            self._window.hide()
-            is_visible = False
+            self._window.minimize()
         return "Hidden"
 
-    def resize_window(self, width, height):
-        """Resize the native OS window."""
-        if self._window:
-            self._window.resize(width, height)
-        return f"Resized to {width}x{height}"
-
-    def sync_window_size(self, width, height):
-        """Called by the frontend ResizeObserver to sync native window."""
-        if self._window:
-            # Enforce Hard Constraints: Min 150px (Collapsed), Max 1400px (Full)
-            clamped_width = max(150, min(1400, int(width)))
-            # Height is FIXED at 800px
-            self._window.resize(clamped_width, 800)
-        return "Synced"
-
-    def set_ghost_mode(self, enable):
-        """Toggle click-through (Ghost Mode) via the UI."""
-        if sys.platform == 'win32' and win_engine:
-            hwnd = get_hwnd(self._window)
-            win_engine.set_click_through(hwnd, enable)
-            return f"Ghost Mode: {enable}"
-        return "Not Supported on this Platform"
-
     def terminate_app(self):
-        """Cleanly exit the application."""
-        if self._window:
-            self._window.destroy()
-        sys.exit(0)
+        print("ShadowLith Terminating...")
+        if self.audio_engine: 
+            try:
+                self.audio_engine.terminate()
+            except:
+                pass
+        os._exit(0)
 
-def get_hwnd(window):
-    """Retrieve HWND in a cross-platform way for Windows."""
-    try:
-        # 1. Qt Backend (winId)
-        if hasattr(window, 'native') and hasattr(window.native, 'winId'):
-             return int(window.native.winId())
-             
-        # 2. .NET/Edge Backend (Handle)
-        if hasattr(window, 'native') and hasattr(window.native, 'Handle'):
-            # It might be an IntPtr
-            return int(window.native.Handle)
-        
-        # 3. Window Title Search (Fallback)
-        # Note: If multiple windows have same title, this could be risky, but unlikely for this app.
-        if sys.platform == "win32":
-            hwnd = ctypes.windll.user32.FindWindowW(None, "ShadowLith")
-            if hwnd: return hwnd
-            
-    except Exception as e:
-        print(f"HWND Retrieval failed: {e}")
-    return 0
-
-def apply_stealth_hints(window):
-    """Applies OS-specific stealth/window-manager hints."""
-    time.sleep(0.5)
-    
-    if sys.platform == "win32":
-        if win_engine:
-            hwnd = get_hwnd(window)
-            if hwnd:
-                try:
-                    GWL_EXSTYLE = -20
-                    WS_EX_LAYERED = 0x00080000
-                    user32 = ctypes.windll.user32
-                    
-                    # 1. Layered Window
-                    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
-                    
-                    # 2. Force Background Brush to NULL (Prevent White Flash/Paint)
-                    GCLP_HBRBACKGROUND = -10
-                    # 0 = NULL_BRUSH (Transparent), 4 = BLACK_BRUSH
-                    # Note: SetClassLongPtr might be SetClassLongW on 32-bit python, but we assume 64-bit usually
-                    try:
-                         if sys.maxsize > 2**32:
-                             user32.SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, 0)
-                         else:
-                             user32.SetClassLongW(hwnd, GCLP_HBRBACKGROUND, 0)
-                    except:
-                         pass # API might not exist on some older systems
-                         
-                except Exception as e:
-                    print(f"Layered Style/Brush Injection Failed: {e}")
-
-                win_engine.set_window_affinity(hwnd)
-            else:
-                print("Could not find HWND for Stealth Mode.")
-    else:
-        # Existing Linux X11 Logic
-        try:
-             if hasattr(window.gui, 'window'):
-                 win_id = window.gui.window.winId()
-                 atoms = [
-                     ["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a", "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR"],
-                     ["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a", "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
-                     ["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a", "-append", "_NET_WM_STATE", "_NET_WM_STATE_STAYS_ON_TOP"]
-                 ]
-                 for cmd in atoms:
-                     subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                 print(f"ShadowLith Stealth Active | X11 ID: {win_id}")
-        except Exception as e:
-            print(f"Stealth injection failed: {e}")
-
+# --- STARTUP LOGIC ---
 def start_app():
-    global is_visible
-    w, h = 1200, 850
     api = ShadowLithAPI()
     
-    # URL Logic
+    # Determine URL
+    if getattr(sys, 'frozen', False):
+        BASE_DIR = sys._MEIPASS
+    else:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
     file_path = os.path.join(BASE_DIR, "ui", "index.html")
-    if os.getenv("SHADOWLITH_DEBUG"):
-        url = os.getenv("SHADOWLITH_DEBUG_URL")
-        print(f"Debug Mode: {url}")
+    
+    if os.getenv("SHADOWLITH_DEBUG") == "true":
+        url = os.getenv("SHADOWLITH_DEBUG_URL", "http://localhost:5174")
+        print(f"Debug Mode Active: {url}")
     elif os.path.exists(file_path):
         url = file_path
         print("Production Build Loaded.")
     else:
         url = "http://localhost:5174"
-        print("Forced Dev Server (Localhost) - UI Build Not Found.")
-
-    # Use Qt engine on Windows (User Preferred for Transparency)
-    gui_engine = 'qt'
+        print("Fallback to Dev Server (Build missing).")
 
     window = webview.create_window(
-        title="ShadowLith",
-        url=url,
-        js_api=api,
-        width=w, height=h,
-        min_size=(150, 100),
+        "ShadowLith",
+        url,
+        width=1200,
+        height=850,
         frameless=True,
-        on_top=True,
         transparent=True,
-        easy_drag=False,
-        focus=True,
-        background_color='#000000', # Force Black Background
-        hidden=False # DEBUG: Show window immediately
+        on_top=True,
+        js_api=api
     )
-    
-    api.set_window(window)
 
     def on_loaded():
-        # Inject CSS to force transparency
+        # Force transparency on the Root/App container
         window.evaluate_js("""
             document.body.style.backgroundColor = 'transparent';
             document.documentElement.style.backgroundColor = 'transparent';
         """)
         
-        # INJECT NATIVE RESIZE WATCHER:
-        # Watches the React Layout and syncs the OS window size automatically
-        # Throttled with requestAnimationFrame for smoothness
+        # Inject ResizeWatcher to sync OS window with React layout
         window.evaluate_js("""
             (function() {
                 let rAF_running = false;
                 const observer = new ResizeObserver(entries => {
                     if (rAF_running) return;
                     rAF_running = true;
-                    
                     requestAnimationFrame(() => {
                         for (let entry of entries) {
                             const width = entry.contentRect.width;
@@ -342,54 +324,24 @@ def start_app():
                         rAF_running = false;
                     });
                 });
-                
                 const target = document.querySelector('#root > div');
                 if (target) {
                     observer.observe(target);
-                    console.log("ShadowLith Smooth-ResizeWatcher Active");
                 }
             })();
         """)
-        
-        window.show()
-        print("ShadowLith UI Loaded & Visible (ResizeWatcher Active)")
+        print("ShadowLith UI Loaded & CSS Injected.")
+
+    def on_window_ready():
+        # Start all background tasks after UI is shown
+        threading.Thread(target=api.init_background_services, args=(window,), daemon=True).start()
 
     window.events.loaded += on_loaded
-
-    def toggle():
-        global is_visible
-        if window:
-            if is_visible:
-                window.hide()
-                is_visible = False
-            else:
-                window.show()
-                is_visible = True
-
-    def setup_hotkeys():
-        try:
-            h_key = keyboard.GlobalHotKeys({'<alt>+<space>': toggle})
-            h_key.start()
-            
-            # Use a lambda for ghost toggle to capture current state
-            ghost_state = [False] # Use a list for closure mutability
-            def toggle_ghost_wrapper():
-                ghost_state[0] = not ghost_state[0]
-                if sys.platform == 'win32' and win_engine:
-                    hwnd = get_hwnd(window)
-                    win_engine.set_click_through(hwnd, ghost_state[0])
-
-            g_key = keyboard.GlobalHotKeys({'<alt>+<shift>+<space>': toggle_ghost_wrapper})
-            g_key.start()
-            print("ShadowLith Hotkeys Active: Alt+Space (Toggle UI), Alt+Shift+Space (Ghost Mode)")
-        except Exception as e:
-            print(f"Hotkey Setup Failed: {e}")
-
-    # Start hotkeys in a separate thread after a short delay to prevent startup hang
-    import threading
-    threading.Timer(2.0, setup_hotkeys).start()
-
-    webview.start(apply_stealth_hints, window, gui=gui_engine)
+    window.events.shown += on_window_ready
+    
+    # Launch with Qt for superior transparency support on Windows
+    # We set debug=False to prevent the automatic Web Inspector popup
+    webview.start(debug=False, gui='qt')
 
 if __name__ == "__main__":
     start_app()

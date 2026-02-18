@@ -2,6 +2,7 @@ import os
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+import base64
 
 # Load environment variables
 # Load environment variables
@@ -93,6 +94,39 @@ class ShadowLithEngine:
             return response.text
         except Exception as e: 
             return f'{{"type": "error", "explanation": "API Error: {str(e)}"}}'
+
+    def ask_with_image(self, prompt: str, image_base64: str) -> str:
+        """
+        Multimodal query. Note: Images are sent to models.generate_content as 
+        persistent chat sessions typically don't support image blocks in the same way 
+        across all SDK versions. We use it for fresh analysis.
+        """
+        try:
+            # Prepare image part
+            image_part = types.Part.from_bytes(
+                data=base64.b64decode(image_base64),
+                mime_type="image/png"
+            )
+            
+            # Use generate_content for the analysis
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[prompt, image_part],
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_instruction,
+                    temperature=0.1,
+                    response_mime_type="application/json"
+                )
+            )
+            
+            # Sync the chat session with this new information by adding it as a user message
+            # So the chat 'remembers' the context of the screenshot
+            # self.chat.send_message(f"SYSTEM_CONTEXT: User just captured a screenshot. Here is the analysis prompt: {prompt}")
+            
+            return response.text
+        except Exception as e:
+            print(f"Gemini Vision Error: {e}")
+            return f'{{"type": "error", "explanation": "Vision API Error: {str(e)}"}}'
 
 # if __name__ == "__main__":
 #     # Quick test execution
