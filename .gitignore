@@ -26,3 +26,5 @@ Thumbs.db
 
 # Application Specific
 screenshots/
+*.log
+*debug*.log
