@@ -88,15 +88,35 @@ class ShadowLithAPI:
     @latency_timer
     def capture(self):
         """Interactive Snipping Tool."""
-        if self._window_ref:
-            self._window_ref.hide()
-            time.sleep(0.3) # Current way, will optimize later to 'Ghost Camera'
+        import concurrent.futures
 
-        res = self.vision.capture_with_snip()
-        
-        if self._window_ref:
-            self._window_ref.show()
-            
+        result_holder = {"res": None, "error": None}
+
+        def _do_capture():
+            try:
+                if self._window_ref:
+                    self._window_ref.hide()
+                    time.sleep(0.5)  # Allow Qt to fully process the hide
+
+                result_holder["res"] = self.vision.capture_with_snip()
+            except Exception as e:
+                logger.error(f"Capture thread error: {e}")
+                result_holder["error"] = str(e)
+            finally:
+                try:
+                    if self._window_ref:
+                        time.sleep(0.3)
+                        self._window_ref.show()
+                        self._window_ref.restore()
+                except Exception as e:
+                    logger.error(f"Window restore error: {e}")
+
+        # Run in a separate thread to avoid blocking the pywebview JS API thread
+        thread = threading.Thread(target=_do_capture, daemon=True)
+        thread.start()
+        thread.join(timeout=30)  # 30s timeout for snip interaction
+
+        res = result_holder["res"]
         if res:
             self.snip_buffer.append(res)
             return {"status": "success", "count": len(self.snip_buffer)}
