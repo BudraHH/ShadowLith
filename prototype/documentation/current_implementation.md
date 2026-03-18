@@ -1,7 +1,7 @@
 # ShadowLith — Current Implementation Documentation
 
-> **Version:** 2.0.0-MODULAR (Refined)  
-> **Last Updated:** 2026-03-08  
+> **Version:** 2.1.0-STABLE (Robust)  
+> **Last Updated:** 2026-03-19  
 > **Platform:** Windows Primary (High-DPI Optimized)
 
 ---
@@ -41,8 +41,8 @@
 - **Quota-Aware Orchestration:** Real-time API tracking using a **Sliding Window (Rolling 60s)** algorithm to match Gemini's rate limits precisely.
 - **Model Waterfall Migration:** Automated fallback across tiered models (Flash -> Flash-Lite -> Preview) with seamless conversation history injection.
 - **Multimodal Accumulation:** Collect multiple vision snippets and OCR text into a shared buffer before triggering a unified analysis.
-- **Stealth First:** WDA (Window Display Affinity), Ghost styles, and masqueraded process identity.
-- **Engine Stability:** Staggered boot sequence to prevent QT-backend deadlocks during high-DPI window styling.
+- **Stealth First:** WDA (Window Display Affinity), Ghost styles, and **PID-based Robust HWND Detection** to ensure local process isolation.
+- **Engine Stability:** Staggered boot sequence and **Visual Heartbeat (Crash Detection)** indicator to ensure QT-backend health.
 
 ---
 
@@ -104,7 +104,7 @@ Orchestrates service initialization and window lifecycle with stability guards.
 1. **Boot Routine:** Implements a 2-second staggered delay to allow the QT engine to stabilize before applying native Win32 styles.
 2. **Init Services:** Boots `AIService`, `VisionService`, `WindowService`, `AudioService`, and `PromptService`.
 3. **Bridge:** Instantiates `ShadowLithAPI` as the `js_api`.
-4. **Stealth Launch:** Applies `apply_stealth()` (Affinity) and `set_ghost_style` after the window handle is confirmed ready.
+4. **Stealth Launch:** Applies `apply_stealth()` (Affinity) and `set_ghost_style` after the window handle is confirmed via a **10-attempt PID verification loop**.
 
 ### Core Module
 
@@ -128,6 +128,11 @@ Orchestrates service initialization and window lifecycle with stability guards.
 - **Interactive Snip:** Subprocess-based region tool (`Snapper`).
 - **OCR:** Windows SDK integration with grayscale/contrast pre-processing.
 - **Optimization:** Crops are converted to JPEG and downscaled to 1600px width to save API tokens.
+
+#### `services/window_service.py`
+- **Robust Identification:** Uses `EnumWindows` + `GetWindowThreadProcessId` to find the HWND belonging to the current process, preventing conflicts with other WebView2 apps.
+- **Stealth (WDA):** Recursively applies `WDA_EXCLUDEFROMCAPTURE` to all child renderer windows.
+- **Interactivity:** Toggles `WS_EX_NOACTIVATE` to allow the overlay to stay non-interactive unless focused.
 
 #### `services/prompt_service.py`
 - **JSON Robustness Rules:** Enforces a "No Double Quotes" policy in technical blocks. Commands AI to use single quotes (`'`) for code literals to prevent JSON breakout.
@@ -178,9 +183,10 @@ Orchestrates service initialization and window lifecycle with stability guards.
 
 | Feature | Implementation | Benefit |
 |---------|----------------|---------|
-| **Capture Stealth** | `WDA_EXCLUDEFROMCAPTURE` | Invisible to OBS/Teams/Screen-share. |
+| **Capture Stealth** | `WDA_EXCLUDEFROMCAPTURE` | Invisible to OBS/Teams. Applied natively to all process windows. |
+| **Robust HWND** | PID-based Lookup | Prevents accidental targeting of other Apps with the same masquerade title. |
 | **Focus Stealth** | `WS_EX_NOACTIVATE` | Click-through capability; doesn't steal focus. |
-| **Startup Stability** | Staggered Boot Sequence | Prevents QT deadlocks on initialization. |
+| **Startup Stability** | Staggered Boot + Heartbeat | Prevents QT deadlocks and provides visual state confirmation. |
 | **API Resilience** | Sliding Window + Waterfall | Precise rate-limit matching and 3-tier fallback. |
 | **JSON Integrity** | Pre-Cleaner + Prompt Constraint | Prevents UI crashes from malformed AI code blocks. |
 
@@ -197,10 +203,11 @@ ShadowLith uses a strictly defined JSON block structure. To ensure parsing never
 
 ## User Guide
 
-1. **Configuration:** Set up keys and model tiers in `.env`.
+1. **Configuration:** Set up keys and model tiers in `.env`. You can toggle `STEALTH_MODE_ON=true/false` to disable invisibility for testing.
 2. **Collection:** Use `Capture` for text or `Analyse Snippet` for visuals. Accumulate multiple items if the problem spans different areas.
 3. **Execution:** Click `Process` to solve.
 4. **Resilience:** Monitor the `API / 10` counter. The system will automatically switch models if you hit limits.
+5. **Standalone Build:** Run `app/build_app.py` to package the React UI and Python backend into a single `ShadowLith.exe`.
 
 ---
 
