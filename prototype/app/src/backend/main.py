@@ -149,12 +149,12 @@ def start_app():
                     
                     api.window.set_ghost_style(interactive=True, hwnd=_hwnd)
                     
-                    # 4. Only show once stealth is confirmed
+                    # 4. Final appearance control
                     if stealth_confirmed:
                         window.show()
-                        logger.info("Window shown with verified stealth.")
+                        logger.info("Window shown with verified stealth (Anti-Capture ON).")
                     else:
-                        logger.error("STEALTH COULD NOT BE VERIFIED — showing anyway as fallback.")
+                        logger.error("Capture Stealth NOT verified — showing anyway.")
                         window.show()
                     
                 # 3. Synchronize initial counters safely

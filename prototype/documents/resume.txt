@@ -1,0 +1,66 @@
+HARI HARABUDRAP
+Chennai, India
++91 7397 509 844 | hariharabudra@gmail.com
+linkedin.com/in/hari-hara-budra | github.com/BudraHH | https://budraportfolio.vercel.app/
+PROFESSIONAL SUMMARY
+Software Development Engineer with a B.Tech in AI & Data Science and 2 years of experience developing AI
+integrated applications and low-latency backend architectures. Proven ability to propose purposeful solutions and
+analyze complex data using Python, React, and Java. A hackathon-awarded developer with a strong learner mindset
+and adaptability to changing environments. Focused on collaborating with diverse teams to scale cloud-native systems
+and deliver results that align with strategic goals in the energy sector.
+TECHNICAL SKILLS
+• Languages: Python (Primary), JavaScript (ES6+), TypeScript, Java, SQL.
+• AI &Intelligent Systems: LLM Integration, Machine Learning, Data Science Fundamentals, Prompt Engineering.
+• Frontend & UI: React.js, Tailwind CSS, Responsive Design.
+• Backend & Architecture: FastAPI, Node.js, Express.js, RESTful APIs, Microservices, Distributed Systems.
+• Cloud & DevOps: AWS (Lambda, S3), Docker (Containerization), CI/CD Pipelines, Git, GitHub.
+• Databases & Caching: PostgreSQL (SQL), MongoDB (NoSQL), Redis (In-memory).
+• Core CS Fundamentals: Data Structures & Algorithms (DSA), OOP, DBMS, Computer Networks.
+PROFESSIONAL EXPERIENCE
+SYSTITSOFT TECHNOLOGIES | Software Developer Intern
+Jul 2025– Dec 2025
+• React.js andFastAPIwereusedtobuildfull-stack features, including responsive user interfaces and modular backend
+components.
+• 30% increase in throughput achieved by optimizing data-fetching logic to make the application faster and more
+efficient.
+• Agile team collaboration, including daily code reviews and design meetings, to keep the codebase clean and pro
+fessional.
+• Full-stack testing and debugging performed on production issues to fix bugs and ensure every feature was stable
+before release.
+ZOHOCORPORATION(MANAGEENGINE) | Software Developer Intern
+Apr 2025– Jun 2025
+• Java and PostgreSQL were used to build backend systems for internal productivity tools and automate engineering
+workflows.
+• 40%reduction in latency achieved for data-intensive tasks by refining SQL queries and database schemas.
+• Root cause analysis performed to identify and fix architectural bottlenecks, ensuring the system remained stable
+under heavy workloads.
+• Git anddesigndocumentsusedtomanagecoderepositories and plan technical features while following engineering
+standards.
+KEY PROJECTS
+ApplyVortex- Distributed AI Automation Ecosystem
+GitHub
+• FastAPI, Redis, and Docker were used to build a distributed system that handles multiple tasks and automates data
+workflows.
+• Qwen 2.5 (Local LLM) was integrated for data matching and optimized to reach sub-second speeds for a fast user
+experience.
+CloudDrive- AWS-Powered Storage Platform
+GitHub
+• Node.js and AWS S3 were used to build a storage service that offloaded 100% of file transfer traffic to keep the
+system stable and fast.
+• MongoDB and nested indexing were used to optimize NoSQL schemas, which improved file retrieval speeds by
+35%.
+MeasureCo- Serverless Assessment SaaS
+GitHub
+• AWS Lambda and Docker were used to build a code execution engine that handles 100+ users at once in secure,
+isolated environments.
+• 30%reduction in grading time achieved by using a serverless architecture to automate workflows and manage tests
+centrally.
+EDUCATION & ACHIEVEMENTS
+Bachelor of Technology, AI & Data Science | Rathinam Technical Campus | CGPA: 8.01
+• Volkswagen iMobilithon 2024: Shortlisted among Top 15 ideas for innovative technical system design.
+2025
+• PSGiTech Hackfest 2024: Secured Runner-up for building a functional prototype under 24-hour constraints.
+
+
+
+this is my resume, go thorugh it completely, just say "yes" if you have read it. this is important becasue you will be creating stories for answering the questions in this self recorded Assessment as well as in the interviews to come.

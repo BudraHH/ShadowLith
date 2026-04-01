@@ -4,7 +4,7 @@ Set objShell = CreateObject("WScript.Shell")
 objShell.CurrentDirectory = "D:\projects\ShadowLith\prototype\app\src\backend"
 
 ' Path to the Python executable inside the virtual environment
-pythonPath = """D:\projects\ShadowLith\prototype\app\src\backend\venv\Scripts\python.exe"""
+pythonPath = """D:\projects\ShadowLith\prototype\app\src\backend\venv\Scripts\pythonw.exe"""
 
 ' The script we want to run
 scriptPath = "main.py"

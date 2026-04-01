@@ -92,6 +92,7 @@ class WindowService:
         if not _hwnd: return False
 
         try:
+            if not win32gui: return False # Added check
             # GWL_EXSTYLE attributes
             WS_EX_TOOLWINDOW = 0x00000080
             WS_EX_APPWINDOW  = 0x00040000
@@ -111,11 +112,26 @@ class WindowService:
 
             win32gui.SetWindowLong(_hwnd, win32con.GWL_EXSTYLE, style)
             
+            # Recursive application to children (sometimes QT creates separate taskbar-eligible children)
+            def enum_child_style(child_hwnd, _):
+                try:
+                    c_style = win32gui.GetWindowLong(child_hwnd, win32con.GWL_EXSTYLE)
+                    c_style |= WS_EX_TOOLWINDOW
+                    c_style &= ~WS_EX_APPWINDOW
+                    win32gui.SetWindowLong(child_hwnd, win32con.GWL_EXSTYLE, c_style)
+                except: pass
+                return True
+            
+            try:
+                if win32gui:
+                    win32gui.EnumChildWindows(_hwnd, enum_child_style, None)
+            except: pass
+
             # Force refresh
             win32gui.SetWindowPos(_hwnd, 0, 0, 0, 0, 0, 
                 win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED)
             
-            logger.info(f"Window Style: Interactive={interactive}")
+            logger.info(f"Window Style: Interactive={interactive} (Taskbar Hidden)")
             return True
         except Exception as e:
             logger.error(f"Failed to apply window style: {e}")
